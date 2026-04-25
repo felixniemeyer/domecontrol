@@ -1,0 +1,363 @@
+:root {
+  color-scheme: dark;
+  font-family: "IBM Plex Mono", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  background: #0d1017;
+  color: #f7f5ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 30%),
+    #0d1017;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 1rem;
+  padding: 0.95rem 1.1rem;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+button[hidden] {
+  display: none;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+.screen {
+  min-height: 100vh;
+}
+
+.screen--intro {
+  background:
+    radial-gradient(circle at 30% 32%, rgba(255, 129, 102, 0.24) 0%, rgba(255, 129, 102, 0) 58%),
+    radial-gradient(circle at 70% 30%, rgba(96, 176, 255, 0.22) 0%, rgba(96, 176, 255, 0) 62%),
+    linear-gradient(180deg, #11161e 0%, #090b10 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.screen__frame,
+.control-shell {
+  width: min(32rem, 100%);
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 1.25rem;
+}
+
+.intro-shell {
+  width: min(32rem, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 1.25rem;
+  display: grid;
+  align-content: center;
+  gap: 1rem;
+}
+
+.screen--calibration[data-phase="front"] {
+  background: linear-gradient(180deg, #321432 0%, #140914 100%);
+}
+
+.screen--calibration[data-phase="right"] {
+  background: linear-gradient(180deg, #14284e 0%, #09121d 100%);
+}
+
+.screen__frame {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  z-index: 0;
+}
+
+.control-shell__eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+.intro-shell h1,
+.control-shell h1,
+.button-panel h2,
+.joystick-panel h2 {
+  margin: 0;
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  line-height: 0.95;
+}
+
+.control-shell__meta p,
+.button-panel p,
+.joystick-panel p {
+  margin: 0;
+  color: rgba(247, 245, 239, 0.78);
+  line-height: 1.45;
+}
+
+.calibration-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: rgba(3, 5, 9, 0.75);
+}
+
+.calibration-preview[hidden] {
+  display: none;
+}
+
+.calibration-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.82;
+}
+
+.screen__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.calibration-preview__cross-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+}
+
+.calibration-heading {
+  position: absolute;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--cross-color);
+  opacity: 0.75;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--cross-color) 44%, transparent);
+}
+
+.calibration-preview__cross {
+  width: min(62vw, 62vh);
+  height: min(62vw, 62vh);
+  overflow: visible;
+  stroke: var(--cross-color);
+  fill: var(--cross-color);
+  opacity: 0.75;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--cross-color) 40%, transparent));
+}
+
+.calibration-preview__cross line {
+  stroke-width: 1.8;
+  stroke-linecap: butt;
+}
+
+.screen--calibration[data-phase="front"] {
+  --cross-color: #f0f;
+}
+
+.screen--calibration[data-phase="right"] {
+  --cross-color: #0ff;
+}
+
+.screen__actions {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  pointer-events: auto;
+}
+
+.screen__actions button {
+  min-height: 3.5rem;
+  background: rgba(8, 11, 16, 0.68);
+  color: #f7f5ef;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(14px);
+}
+
+#confirm-alignment,
+#start-calibration {
+  background: #fff;
+  color: #000;
+  opacity: 0.9; 
+}
+
+#back-calibration {
+  background: #0008;
+  border: 0.3rem solid #fff;
+  opacity: 0.9; 
+}
+
+.screen--control {
+  background:
+    radial-gradient(circle at top, rgba(118, 185, 255, 0.18), transparent 28%),
+    linear-gradient(180deg, #11161e 0%, #090b10 100%);
+}
+
+.screen--control[data-mode="laptop"] {
+  display: grid;
+  place-items: center;
+  background: #090b10;
+}
+
+.control-shell {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding-top: 1.5rem;
+  padding-bottom: 2rem;
+}
+
+.control-shell__header,
+.joystick-panel,
+.button-panel {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.5rem;
+  padding: 1rem;
+  backdrop-filter: blur(14px);
+}
+
+.control-shell__header {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.control-shell__meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.joystick-panel[hidden] {
+  display: none;
+}
+
+.joystick-panel,
+.button-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.screen--control[data-mode="laptop"] .control-shell {
+  width: min(90vmin, 34rem);
+  min-height: auto;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.screen--control[data-mode="laptop"] .control-shell__header,
+.screen--control[data-mode="laptop"] .button-panel,
+.screen--control[data-mode="laptop"] .joystick-panel__header {
+  display: none;
+}
+
+.screen--control[data-mode="laptop"] .joystick-panel {
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  backdrop-filter: none;
+}
+
+.aim-pad {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, rgba(133, 220, 255, 0.14), transparent 34%),
+    rgba(5, 8, 13, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  touch-action: none;
+}
+
+.screen--control[data-mode="laptop"] .aim-pad {
+  width: min(90vmin, 34rem);
+  background:
+    radial-gradient(circle at center, rgba(255, 215, 106, 0.18), transparent 24%),
+    radial-gradient(circle at center, rgba(133, 220, 255, 0.12), transparent 58%),
+    #05080d;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 42px rgba(133, 220, 255, 0.12);
+}
+
+.aim-pad__ring {
+  position: absolute;
+  inset: 15%;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.aim-pad__cursor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: #ffd76a;
+  box-shadow: 0 0 0 0.55rem rgba(255, 215, 106, 0.18);
+  transform: translate(-50%, -50%);
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.button-grid button {
+  min-height: 5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f7f5ef;
+}
+
+.button-grid button:first-child {
+  grid-column: 1 / -1;
+}
+
+.button-grid button.is-active {
+  background: #ffd76a;
+  color: #16130a;
+}
+
+pre[hidden] {
+  display: none;
+}
+
+@media (min-width: 720px) {
+  .control-shell {
+    width: min(38rem, 100%);
+  }
+}

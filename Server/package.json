@@ -1,0 +1,21 @@
+{
+  "name": "dome-control-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --loader ts-node/esm src/server.ts",
+    "start": "node --loader ts-node/esm src/server.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "peer": "^1.0.2",
+    "ts-node": "^10.9.2",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "@types/ws": "^8.5.14",
+    "typescript": "^5.8.2"
+  }
+}

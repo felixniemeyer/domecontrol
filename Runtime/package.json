@@ -1,0 +1,9 @@
+{
+  "name": "dome-control-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "gl-matrix": "^3.4.3"
+  }
+}

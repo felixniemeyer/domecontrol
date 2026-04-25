@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dome-control client</title>
+  </head>
+  <body>
+    <main class="app">
+      <section id="intro-screen" class="screen screen--intro">
+        <div class="intro-shell">
+          <p class="control-shell__eyebrow">dome-control</p>
+          <h1>Calibrate your phone to the dome</h1>
+          <button id="start-calibration" type="button">Start</button>
+        </div>
+      </section>
+
+      <section id="calibration-screen" class="screen screen--calibration">
+        <div class="screen__frame">
+          <div id="calibration-preview" class="calibration-preview">
+            <video id="calibration-camera" autoplay playsinline muted></video>
+            <div class="calibration-preview__cross-wrap">
+              <p id="calibration-heading" class="calibration-heading">front</p>
+              <svg class="calibration-preview__cross" viewBox="0 0 100 100" aria-hidden="true">
+                <defs>
+                  <marker id="cross-arrowhead-centered" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                    <path d="M 1 1 L 7 4 L 1 7 z" fill="context-stroke" />
+                  </marker>
+                </defs>
+                <line x1="50" y1="82" x2="50" y2="18" marker-end="url(#cross-arrowhead-centered)" />
+                <line x1="18" y1="50" x2="82" y2="50" marker-end="url(#cross-arrowhead-centered)" />
+              </svg>
+            </div>
+          </div>
+
+          <div class="screen__overlay">
+            <div class="screen__actions">
+              <button id="back-calibration" type="button" hidden>Back</button>
+              <button id="confirm-alignment" type="button">Confirm</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="control-screen" class="screen screen--control" hidden>
+        <div class="control-shell">
+          <header class="control-shell__header">
+            <div>
+              <p id="control-eyebrow" class="control-shell__eyebrow">dome-control</p>
+              <h1 id="control-title">Phone controls</h1>
+            </div>
+            <div class="control-shell__meta">
+              <p id="transport-status">Connecting…</p>
+              <p id="input-status">Waiting for control</p>
+            </div>
+          </header>
+
+          <section id="laptop-joystick-panel" class="joystick-panel" hidden>
+            <div class="joystick-panel__header">
+              <h2>Joystick</h2>
+              <p>Laptop mode uses drag aiming instead of phone orientation.</p>
+            </div>
+            <div id="aim-pad" class="aim-pad">
+              <div class="aim-pad__ring"></div>
+              <div id="aim-cursor" class="aim-pad__cursor"></div>
+            </div>
+          </section>
+
+          <section class="button-panel">
+            <div class="button-panel__header">
+              <h2>Controls</h2>
+              <p id="control-copy">Use phone orientation and hold accelerate.</p>
+            </div>
+            <div id="button-grid" class="button-grid"></div>
+          </section>
+        </div>
+
+        <pre id="controller-state" hidden></pre>
+        <pre id="last-packet" hidden></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
