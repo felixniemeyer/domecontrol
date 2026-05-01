@@ -7,6 +7,7 @@ export type ControllerButtons = {
 }
 
 export type ControllerButtonKey = keyof ControllerButtons
+export type ControllerAlignmentCross = 'front' | 'right'
 
 export type ControllerVector3 = [number, number, number]
 

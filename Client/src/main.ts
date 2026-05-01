@@ -8,6 +8,8 @@ import {
   domemasterToCamDir,
   isDomeControlPacket,
   type ControllerButtonAckPacket,
+  type ControllerAlignmentCross,
+  type ControllerAlignmentPacket,
   type ControllerButtons,
   type ControllerButtonEventPacket,
   type ControllerButtonKey,
@@ -20,7 +22,14 @@ import {
 
 type ArtworkRuntimeTarget = {
   upsertControllerFrame?: (id: string, frame: ControllerFrame, transport?: 'debug-local') => void
+  applyControllerButtonEvent?: (
+    id: string,
+    button: ControllerButtonKey,
+    pressed: boolean,
+    sentAt?: number,
+  ) => void
   removeController?: (id: string) => void
+  showControllerAlignment?: (id: string, cross: ControllerAlignmentCross | null) => void
 }
 
 type CalibrationPhase = 'front' | 'right' | 'done'
@@ -62,6 +71,10 @@ const peerSecure = query.get('peer-secure') === '1' || (
 const peerPort = Number(query.get('peer-port') ?? (peerSecure ? window.location.port || 443 : 8081))
 const peerPath = query.get('peer-path') ?? '/peerjs'
 const peerConfig = buildPeerConfig(query)
+const controllerInstanceId = Math.random().toString(36).slice(2)
+const controllerClaimChannel = typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel('dome-control-controller')
+  : null
 
 const direction = vec3.fromValues(0, 0, 1)
 const domemasterCursor = vec2.create()
@@ -98,7 +111,10 @@ let cameraStream: MediaStream | null = null
 let transportLabel = 'Disconnected'
 let inputLabel = 'Pointer aiming active'
 let lastSentSignature = ''
+let lastSentAlignmentCross: ControllerAlignmentCross | null | undefined
 let peerReconnectTimer: number | null = null
+let supersededByNewerController = false
+let pageIsLeaving = false
 const pendingButtonEvents = new Map<number, ControllerButtonEventPacket>()
 let buttonRetryTimer: number | null = null
 const buttonRetryIntervalMs = 80
@@ -177,6 +193,42 @@ function logWebRtc(event: string, data?: Record<string, unknown>) {
   })
 }
 
+function announceControllerClaim() {
+  controllerClaimChannel?.postMessage({
+    type: 'controller-claim',
+    sessionId,
+    controllerId,
+    instanceId: controllerInstanceId,
+  })
+}
+
+function retireSupersededController() {
+  if (supersededByNewerController) return
+  if (buttons.accelerate) {
+    buttons.accelerate = false
+    sendButtonEvent('accelerate', false)
+    queueFrameIfChanged(true)
+  }
+  sendGoodbye()
+  supersededByNewerController = true
+  destroyPeer()
+  stopButtonRetryTimer()
+  setTransportStatus('Controller superseded by newer tab')
+  logWebRtc('controller-superseded')
+}
+
+controllerClaimChannel?.addEventListener('message', (event: MessageEvent) => {
+  const data = event.data as {
+    type?: string
+    sessionId?: string
+    instanceId?: string
+  }
+  if (data.type !== 'controller-claim') return
+  if (data.sessionId !== sessionId) return
+  if (data.instanceId === controllerInstanceId) return
+  retireSupersededController()
+})
+
 const introScreen = document.getElementById('intro-screen') as HTMLElement
 const introTitle = introScreen.querySelector('h1') as HTMLHeadingElement
 const calibrationScreen = document.getElementById('calibration-screen') as HTMLElement
@@ -224,6 +276,7 @@ function setActiveScreen(screen: 'intro' | 'calibration' | 'control') {
 
 function setCalibrationUi() {
   if (laptopMode) {
+    sendAlignment(null)
     setActiveScreen('control')
     controlScreen.dataset.mode = 'laptop'
     laptopJoystickPanel.hidden = false
@@ -244,6 +297,7 @@ function setCalibrationUi() {
   backCalibrationButton.hidden = calibrationPhase === 'done'
 
   if (calibrationPhase === 'front') {
+    sendAlignment('front')
     calibrationScreen.dataset.phase = 'front'
     calibrationHeading.textContent = 'front'
     confirmAlignmentButton.textContent = 'Confirm'
@@ -253,6 +307,7 @@ function setCalibrationUi() {
   }
 
   if (calibrationPhase === 'right') {
+    sendAlignment('right')
     calibrationScreen.dataset.phase = 'right'
     calibrationHeading.textContent = 'right'
     confirmAlignmentButton.textContent = 'Confirm'
@@ -261,6 +316,7 @@ function setCalibrationUi() {
     return
   }
 
+  sendAlignment(null)
   confirmAlignmentButton.hidden = true
   backCalibrationButton.hidden = true
   calibrationPreview.hidden = true
@@ -308,6 +364,17 @@ function buildButtonEventPacket(button: ControllerButtonKey, pressed: boolean): 
     sentAt: performance.now() * 0.001,
     button,
     pressed,
+  }
+}
+
+function buildAlignmentPacket(cross: ControllerAlignmentCross | null): ControllerAlignmentPacket {
+  return {
+    protocol: DOME_CONTROL_PROTOCOL,
+    type: 'controller-alignment',
+    sessionId,
+    controllerId,
+    cross,
+    sentAt: performance.now() * 0.001,
   }
 }
 
@@ -383,6 +450,7 @@ function updateDiagnostics(frame: ControllerFrame, packet: ControllerFramePacket
 }
 
 function sendFrame() {
+  if (supersededByNewerController) return
   const frame = buildFrame()
   const packet = buildFramePacket(frame)
 
@@ -400,7 +468,23 @@ function sendFrame() {
   updateDiagnostics(frame, packet)
 }
 
+function sendAlignment(cross: ControllerAlignmentCross | null, force = false) {
+  if (supersededByNewerController) return
+  if (!force && lastSentAlignmentCross === cross) return
+  lastSentAlignmentCross = cross
+
+  const directTarget = findArtworkTarget()
+  if (directTarget?.showControllerAlignment) {
+    directTarget.showControllerAlignment(controllerId, cross)
+    return
+  }
+  if (controlConnection?.open) {
+    controlConnection.send(buildAlignmentPacket(cross))
+  }
+}
+
 function sendHeartbeat() {
+  if (supersededByNewerController) return
   const packet = buildHeartbeatPacket()
   const directTarget = findArtworkTarget()
   if (directTarget?.upsertControllerFrame) {
@@ -412,9 +496,11 @@ function sendHeartbeat() {
 }
 
 function sendButtonEvent(button: ControllerButtonKey, pressed: boolean) {
+  if (supersededByNewerController) return
   const packet = buildButtonEventPacket(button, pressed)
   const directTarget = findArtworkTarget()
-  if (directTarget?.upsertControllerFrame) {
+  if (directTarget?.applyControllerButtonEvent) {
+    directTarget.applyControllerButtonEvent(controllerId, button, pressed, packet.sentAt)
     if (lastPacket) {
       lastPacket.textContent = JSON.stringify(packet, null, 2)
     }
@@ -732,6 +818,7 @@ function initializeButtons() {
     const button = document.createElement('button')
     button.type = 'button'
     button.textContent = spec.label
+    let activePointerId: number | null = null
 
     const setPressed = (pressed: boolean) => {
       if (buttons[spec.key] === pressed) return
@@ -740,28 +827,43 @@ function initializeButtons() {
       sendButtonEvent(spec.key, pressed)
       queueFrameIfChanged(true)
     }
+    const releasePointer = (pointerId: number) => {
+      if (button.hasPointerCapture(pointerId)) {
+        button.releasePointerCapture(pointerId)
+      }
+      if (activePointerId === pointerId) {
+        activePointerId = null
+        setPressed(false)
+      }
+    }
+    const preventDefaultPressBehavior = (event: Event) => {
+      event.preventDefault()
+    }
 
     button.addEventListener('pointerdown', (event) => {
+      if (!event.isPrimary || activePointerId != null) return
       event.preventDefault()
+      activePointerId = event.pointerId
       button.setPointerCapture(event.pointerId)
       setPressed(true)
     })
     button.addEventListener('pointerup', (event) => {
-      if (button.hasPointerCapture(event.pointerId)) {
-        button.releasePointerCapture(event.pointerId)
-      }
-      setPressed(false)
+      event.preventDefault()
+      releasePointer(event.pointerId)
     })
     button.addEventListener('pointercancel', (event) => {
-      if (button.hasPointerCapture(event.pointerId)) {
-        button.releasePointerCapture(event.pointerId)
+      event.preventDefault()
+      releasePointer(event.pointerId)
+    })
+    button.addEventListener('lostpointercapture', (event) => {
+      if (activePointerId === event.pointerId) {
+        activePointerId = null
+        setPressed(false)
       }
-      setPressed(false)
     })
-    button.addEventListener('lostpointercapture', () => setPressed(false))
-    button.addEventListener('pointerleave', (event) => {
-      if ((event.buttons & 1) === 0) setPressed(false)
-    })
+    button.addEventListener('contextmenu', preventDefaultPressBehavior)
+    button.addEventListener('dragstart', preventDefaultPressBehavior)
+    button.addEventListener('selectstart', preventDefaultPressBehavior)
 
     buttonGrid.appendChild(button)
   }
@@ -769,42 +871,67 @@ function initializeButtons() {
 
 function initializeAimPad() {
   if (!aimPad) return
+  let activePointerId: number | null = null
+
   const setLaptopAccelerating = (pressed: boolean) => {
     if (!laptopMode || buttons.accelerate === pressed) return
     buttons.accelerate = pressed
     sendButtonEvent('accelerate', pressed)
     queueFrameIfChanged(true)
   }
+  const syncLaptopButtonState = (buttonsMask: number) => {
+    setLaptopAccelerating((buttonsMask & 1) !== 0)
+  }
   const updateFromEvent = (event: PointerEvent) => {
     event.preventDefault()
     updateAimFromPointer(event.clientX, event.clientY)
   }
+  const releasePointerState = (pointerId: number | null) => {
+    if (pointerId != null && aimPad.hasPointerCapture(pointerId)) {
+      aimPad.releasePointerCapture(pointerId)
+    }
+    if (activePointerId === pointerId) {
+      activePointerId = null
+    }
+    setLaptopAccelerating(false)
+  }
 
   aimPad.addEventListener('pointerdown', (event) => {
     aimPad.setPointerCapture(event.pointerId)
+    activePointerId = event.pointerId
     updateFromEvent(event)
-    setLaptopAccelerating(true)
+    syncLaptopButtonState(event.buttons || 1)
   })
   aimPad.addEventListener('pointermove', (event) => {
-    if ((event.buttons & 1) !== 0) {
+    if (laptopMode || (event.buttons & 1) !== 0) {
       updateFromEvent(event)
-      setLaptopAccelerating(true)
+      if (activePointerId === event.pointerId || laptopMode) {
+        syncLaptopButtonState(event.buttons)
+      }
     }
   })
   aimPad.addEventListener('pointerup', (event) => {
-    if (aimPad.hasPointerCapture(event.pointerId)) {
-      aimPad.releasePointerCapture(event.pointerId)
-    }
-    setLaptopAccelerating(false)
+    releasePointerState(event.pointerId)
   })
   aimPad.addEventListener('pointercancel', (event) => {
-    if (aimPad.hasPointerCapture(event.pointerId)) {
-      aimPad.releasePointerCapture(event.pointerId)
+    releasePointerState(event.pointerId)
+  })
+  aimPad.addEventListener('lostpointercapture', (event) => {
+    if (activePointerId === event.pointerId) {
+      activePointerId = null
     }
     setLaptopAccelerating(false)
   })
-  aimPad.addEventListener('lostpointercapture', () => {
+  window.addEventListener('mouseup', () => {
     setLaptopAccelerating(false)
+  })
+  window.addEventListener('blur', () => {
+    releasePointerState(activePointerId)
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      releasePointerState(activePointerId)
+    }
   })
 }
 
@@ -816,6 +943,8 @@ function clearPeerReconnectTimer() {
 }
 
 function schedulePeerReconnect(delayMs = 1500) {
+  if (supersededByNewerController) return
+  if (pageIsLeaving) return
   if (peerReconnectTimer != null) return
   peerReconnectTimer = window.setTimeout(() => {
     peerReconnectTimer = null
@@ -828,6 +957,10 @@ function schedulePeerReconnect(delayMs = 1500) {
 }
 
 function attachConnection(connection: DataConnection) {
+  if (supersededByNewerController) {
+    connection.close()
+    return
+  }
   controlConnection = connection
   logWebRtc('connection-created', {
     label: connection.label,
@@ -842,6 +975,7 @@ function attachConnection(connection: DataConnection) {
       peer: connection.peer,
     })
     connection.send(buildHelloPacket())
+    sendAlignment(calibrationPhase === 'done' ? null : calibrationPhase, true)
     for (const packet of pendingButtonEvents.values()) {
       sendPendingButtonEvent(packet)
     }
@@ -883,6 +1017,7 @@ function attachConnection(connection: DataConnection) {
 }
 
 function openArtworkConnection() {
+  if (supersededByNewerController) return
   if (!peer || !peer.open || peer.destroyed) return
   if (controlConnection?.open) return
 
@@ -893,10 +1028,32 @@ function openArtworkConnection() {
     reliable: true,
     serialization: 'json',
   })
+
+  const timeoutId = window.setTimeout(() => {
+    if (!connection.open && controlConnection === connection) {
+      logWebRtc('connection-timeout', { peer: connection.peer })
+      connection.close()
+      schedulePeerReconnect()
+    }
+  }, 8000)
+
+  connection.on('open', () => {
+    window.clearTimeout(timeoutId)
+  })
+
+  connection.on('close', () => {
+    window.clearTimeout(timeoutId)
+  })
+
+  connection.on('error', () => {
+    window.clearTimeout(timeoutId)
+  })
+
   attachConnection(connection)
 }
 
 function destroyPeer() {
+  clearPeerReconnectTimer()
   controlConnection?.close()
   controlConnection = null
   peer?.destroy()
@@ -904,6 +1061,7 @@ function destroyPeer() {
 }
 
 function connectPeerServer() {
+  if (supersededByNewerController) return
   destroyPeer()
   setTransportStatus(`Connecting via PeerJS ${peerHost}:${peerPort}`)
   logWebRtc('peer-connecting', {
@@ -951,6 +1109,7 @@ function connectPeerServer() {
 }
 
 function sendGoodbye() {
+  sendAlignment(null, true)
   const packet = buildGoodbyePacket()
   const directTarget = findArtworkTarget()
   if (directTarget?.removeController) {
@@ -976,15 +1135,28 @@ confirmAlignmentButton.addEventListener('click', () => {
 })
 
 window.addEventListener('pagehide', () => {
+  pageIsLeaving = true
   sendGoodbye()
+  destroyPeer()
+  stopButtonRetryTimer()
 })
 
 window.addEventListener('beforeunload', () => {
+  pageIsLeaving = true
   sendGoodbye()
+  destroyPeer()
+  stopButtonRetryTimer()
+})
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && pageIsLeaving) {
+    window.location.reload()
+  }
 })
 
 initializeButtons()
 initializeAimPad()
+announceControllerClaim()
 if (laptopMode) {
   calibrationPhase = 'done'
   setInputStatus('Laptop joystick active')
@@ -1001,7 +1173,19 @@ setCalibrationUi()
 connectPeerServer()
 queueFrameIfChanged(true)
 
+let lastHeartbeatTick = Date.now()
+
 window.setInterval(() => {
+  const now = Date.now()
+  // Relax threshold to 20s to avoid loops during mobile browser throttling.
+  // Also don't trip if the document is hidden as throttling is expected there.
+  if (now - lastHeartbeatTick > 20000 && !document.hidden) {
+    logWebRtc('resume-detected', { gap: now - lastHeartbeatTick })
+    destroyPeer()
+    schedulePeerReconnect(2000)
+  }
+  lastHeartbeatTick = now
+
   queueFrameIfChanged(true)
   sendHeartbeat()
 }, 250)

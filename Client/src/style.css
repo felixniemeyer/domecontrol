@@ -17,6 +17,15 @@ body {
     #0d1017;
 }
 
+body,
+button,
+.aim-pad {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 button {
   appearance: none;
   border: 0;
@@ -26,6 +35,7 @@ button {
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
+  touch-action: manipulation;
   transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
 }
 
@@ -341,6 +351,7 @@ button[hidden] {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #f7f5ef;
+  touch-action: none;
 }
 
 .button-grid button:first-child {

@@ -1,4 +1,4 @@
-import type { ControllerButtonKey, ControllerCapabilities, ControllerFrame } from './types.js'
+import type { ControllerAlignmentCross, ControllerButtonKey, ControllerCapabilities, ControllerFrame } from './types.js'
 
 export const DOME_CONTROL_PROTOCOL = 'dome-control/v1'
 
@@ -54,6 +54,15 @@ export type ControllerButtonAckPacket = {
   eventSeq: number
 }
 
+export type ControllerAlignmentPacket = {
+  protocol: typeof DOME_CONTROL_PROTOCOL
+  type: 'controller-alignment'
+  sessionId: string
+  controllerId: string
+  cross: ControllerAlignmentCross | null
+  sentAt: number
+}
+
 export type ControllerSignalPacket = {
   protocol: typeof DOME_CONTROL_PROTOCOL
   type: 'controller-signal'
@@ -72,6 +81,7 @@ export type DomeControlPacket =
   | ControllerFramePacket
   | ControllerButtonEventPacket
   | ControllerButtonAckPacket
+  | ControllerAlignmentPacket
   | ControllerSignalPacket
 
 export function isDomeControlPacket(value: unknown): value is DomeControlPacket {
