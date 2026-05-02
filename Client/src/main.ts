@@ -158,10 +158,6 @@ function buildPeerConfig(params: URLSearchParams): RTCConfiguration {
     })
   }
 
-  if (iceServers.length === 0) {
-    iceServers.push({ urls: 'stun:stun.l.google.com:19302' })
-  }
-
   const requestedPolicy = params.get('ice-transport-policy') ?? params.get('ice-policy')
   const iceTransportPolicy = requestedPolicy === 'relay' || requestedPolicy === 'all'
     ? requestedPolicy
@@ -221,10 +217,12 @@ controllerClaimChannel?.addEventListener('message', (event: MessageEvent) => {
   const data = event.data as {
     type?: string
     sessionId?: string
+    controllerId?: string
     instanceId?: string
   }
   if (data.type !== 'controller-claim') return
   if (data.sessionId !== sessionId) return
+  if (data.controllerId !== controllerId) return
   if (data.instanceId === controllerInstanceId) return
   retireSupersededController()
 })

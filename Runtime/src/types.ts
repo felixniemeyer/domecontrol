@@ -33,6 +33,7 @@ export type ControllerPlayerState = {
   color: string
   colorRgb: ControllerVector3
   cursorAlpha: number
+  pressAlpha: number
   inactivityAlpha: number
   lastHeartbeatAt: number
   lastInputAt: number
