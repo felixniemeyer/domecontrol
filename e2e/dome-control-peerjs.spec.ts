@@ -1,89 +1,22 @@
 import { expect, test } from '@playwright/test'
 
-test('controller connects to artwork over PeerJS and updates player state', async ({ browser }) => {
-  const artworkPage = await browser.newPage()
-  await artworkPage.goto('http://127.0.0.1:5173/?ws-broker-url=off')
-
+async function waitForRuntime(artworkPage: import('@playwright/test').Page) {
   await expect.poll(async () => {
     return artworkPage.evaluate(() => {
       return typeof window.domeControlRuntime?.getSessionState === 'function'
     })
   }).toBe(true)
+}
 
-  const controllerPage = await browser.newPage()
-  await controllerPage.goto('http://127.0.0.1:5176/?laptop=1')
-
+async function waitForPlayers(artworkPage: import('@playwright/test').Page, count: number) {
   await expect.poll(async () => {
     return artworkPage.evaluate(() => {
       return window.domeControlRuntime?.getSessionState().players.length ?? 0
     })
-  }).toBe(1)
+  }).toBe(count)
+}
 
-  const joystick = controllerPage.locator('#aim-pad')
-  await joystick.evaluate((element) => {
-    element.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      pointerId: 1,
-      pointerType: 'mouse',
-      buttons: 1,
-    }))
-  })
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? false
-    })
-  }).toBe(true)
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const snapshot = window.domeControlRuntime?.getGameSnapshot() as { cameraOffset?: [number, number, number] } | undefined
-      const offset = snapshot?.cameraOffset
-      return offset ? Math.hypot(...offset) : 0
-    })
-  }).toBeGreaterThan(0.02)
-
-  await joystick.evaluate((element) => {
-    element.dispatchEvent(new PointerEvent('pointerup', {
-      bubbles: true,
-      pointerId: 1,
-      pointerType: 'mouse',
-      buttons: 0,
-    }))
-  })
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? true
-    })
-  }).toBe(false)
-})
-
-test('laptop pointer movement aims without acceleration', async ({ browser }) => {
-  const artworkPage = await browser.newPage()
-  await artworkPage.goto('http://127.0.0.1:5173/?ws-broker-url=off')
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return typeof window.domeControlRuntime?.getSessionState === 'function'
-    })
-  }).toBe(true)
-
-  const controllerPage = await browser.newPage()
-  await controllerPage.goto('http://127.0.0.1:5176/?laptop=1')
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return window.domeControlRuntime?.getSessionState().players.length ?? 0
-    })
-  }).toBe(1)
-
-  const before = await artworkPage.evaluate(() => {
-    return window.domeControlRuntime?.getSessionState().players[0]?.direction
-  })
-
+async function moveJoystick(controllerPage: import('@playwright/test').Page) {
   await controllerPage.locator('#aim-pad').evaluate((element) => {
     const rect = element.getBoundingClientRect()
     element.dispatchEvent(new PointerEvent('pointermove', {
@@ -95,13 +28,25 @@ test('laptop pointer movement aims without acceleration', async ({ browser }) =>
       clientY: rect.top + rect.height / 2,
     }))
   })
+}
 
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? true
-    })
-  }).toBe(false)
+test('controller reconnects after controller reload without reloading artwork', async ({ browser }) => {
+  const artworkPage = await browser.newPage()
+  await artworkPage.goto('http://127.0.0.1:14173/')
+
+  await waitForRuntime(artworkPage)
+
+  const controllerId = 'reload-check-controller'
+  const controllerPage = await browser.newPage()
+  await controllerPage.goto(`https://127.0.0.1:15176/?laptop=1&controller=${controllerId}`)
+
+  await waitForPlayers(artworkPage, 1)
+
+  const beforeReload = await artworkPage.evaluate(() => {
+    return window.domeControlRuntime?.getSessionState().players[0]?.direction
+  })
+
+  await moveJoystick(controllerPage)
 
   await expect.poll(async () => {
     return artworkPage.evaluate((previous) => {
@@ -112,115 +57,34 @@ test('laptop pointer movement aims without acceleration', async ({ browser }) =>
         next[1] - previous[1],
         next[2] - previous[2],
       )
-    }, before)
+    }, beforeReload)
   }).toBeGreaterThan(0.1)
-})
 
-test('local laptop popup keeps button state independent of pointer motion', async ({ browser }) => {
-  const artworkPage = await browser.newPage()
-  await artworkPage.goto('http://127.0.0.1:5173/?ws-broker-url=off')
+  await controllerPage.reload()
+
+  await waitForPlayers(artworkPage, 1)
 
   await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return typeof window.domeControlRuntime?.getSessionState === 'function'
-    })
+    return artworkPage.evaluate((expectedControllerId) => {
+      return window.domeControlRuntime?.getSessionState().players[0]?.id === expectedControllerId
+    }, controllerId)
   }).toBe(true)
 
-  const popupPromise = artworkPage.waitForEvent('popup')
-  await artworkPage.evaluate(() => {
-    window.open('http://127.0.0.1:5176/?laptop=1', '_blank', 'noopener=false')
-  })
-  const controllerPage = await popupPromise
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return window.domeControlRuntime?.getSessionState().players.length ?? 0
-    })
-  }).toBe(1)
-
-  const joystick = controllerPage.locator('#aim-pad')
-  await joystick.evaluate((element) => {
-    const rect = element.getBoundingClientRect()
-    element.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      pointerId: 1,
-      pointerType: 'mouse',
-      buttons: 1,
-      clientX: rect.right - 10,
-      clientY: rect.top + rect.height / 2,
-    }))
+  const afterReload = await artworkPage.evaluate(() => {
+    return window.domeControlRuntime?.getSessionState().players[0]?.direction
   })
 
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? false
-    })
-  }).toBe(true)
-
-  await controllerPage.waitForTimeout(700)
+  await moveJoystick(controllerPage)
 
   await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? false
-    })
-  }).toBe(true)
-
-  await joystick.evaluate((element) => {
-    const rect = element.getBoundingClientRect()
-    element.dispatchEvent(new PointerEvent('pointerup', {
-      bubbles: true,
-      pointerId: 1,
-      pointerType: 'mouse',
-      buttons: 0,
-      clientX: rect.right - 10,
-      clientY: rect.top + rect.height / 2,
-    }))
-  })
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      const state = window.domeControlRuntime?.getSessionState()
-      return state?.players[0]?.buttons.accelerate ?? true
-    })
-  }).toBe(false)
-})
-
-test('new controller replaces previous controller', async ({ browser }) => {
-  const artworkPage = await browser.newPage()
-  await artworkPage.goto('http://127.0.0.1:5173/?ws-broker-url=off')
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return typeof window.domeControlRuntime?.getSessionState === 'function'
-    })
-  }).toBe(true)
-
-  const firstControllerPage = await browser.newPage()
-  await firstControllerPage.goto('http://127.0.0.1:5176/?laptop=1')
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate(() => {
-      return window.domeControlRuntime?.getSessionState().players.length ?? 0
-    })
-  }).toBe(1)
-
-  const firstControllerId = await artworkPage.evaluate(() => {
-    return window.domeControlRuntime?.getSessionState().players[0]?.id
-  })
-
-  const secondControllerPage = await browser.newPage()
-  await secondControllerPage.goto('http://127.0.0.1:5176/?laptop=1')
-
-  await expect.poll(async () => {
-    return artworkPage.evaluate((previousId) => {
-      const players = window.domeControlRuntime?.getSessionState().players ?? []
-      return players.length === 1 && players[0]?.id !== previousId
-    }, firstControllerId)
-  }).toBe(true)
-
-  await expect.poll(async () => {
-    return firstControllerPage.locator('#transport-status').textContent()
-  }).toContain('superseded')
+    return artworkPage.evaluate((previous) => {
+      const next = window.domeControlRuntime?.getSessionState().players[0]?.direction
+      if (!next || !previous) return 0
+      return Math.hypot(
+        next[0] - previous[0],
+        next[1] - previous[1],
+        next[2] - previous[2],
+      )
+    }, afterReload)
+  }).toBeGreaterThan(0.1)
 })

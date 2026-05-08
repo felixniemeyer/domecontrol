@@ -6,21 +6,13 @@ export type ControllerButtons = {
   accelerate: boolean
 }
 
-export type ControllerButtonKey = keyof ControllerButtons
 export type ControllerAlignmentCross = 'front' | 'right'
 
 export type ControllerVector3 = [number, number, number]
 
-export type ControllerCapabilities = {
-  orientation: boolean
-  touch: boolean
-  haptics: boolean
-  gamepad: boolean
-}
-
-export type ControllerFrame = {
+export type ControllerInputState = {
   direction: ReadonlyVec3 | ControllerVector3
-  buttons: ControllerButtons
+  accelerate: boolean
   color?: string
   sequence?: number
   sentAt?: number

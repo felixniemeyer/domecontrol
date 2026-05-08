@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --loader ts-node/esm src/server.ts",
+    "dev": "node --loader ts-node/esm src/server.ts",
     "start": "node --loader ts-node/esm src/server.ts",
     "build": "tsc --noEmit"
   },

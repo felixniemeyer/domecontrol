@@ -6,31 +6,13 @@ import {
   DOME_CONTROL_PROTOCOL,
   camDirToDomemaster,
   domemasterToCamDir,
-  isDomeControlPacket,
-  type ControllerButtonAckPacket,
   type ControllerAlignmentCross,
   type ControllerAlignmentPacket,
   type ControllerButtons,
-  type ControllerButtonEventPacket,
-  type ControllerButtonKey,
-  type ControllerFrame,
-  type ControllerFramePacket,
+  type ControllerInputPacket,
+  type ControllerInputState,
   type ControllerGoodbyePacket,
-  type ControllerHeartbeatPacket,
-  type ControllerHelloPacket,
 } from '../../Runtime/src/index'
-
-type ArtworkRuntimeTarget = {
-  upsertControllerFrame?: (id: string, frame: ControllerFrame, transport?: 'debug-local') => void
-  applyControllerButtonEvent?: (
-    id: string,
-    button: ControllerButtonKey,
-    pressed: boolean,
-    sentAt?: number,
-  ) => void
-  removeController?: (id: string) => void
-  showControllerAlignment?: (id: string, cross: ControllerAlignmentCross | null) => void
-}
 
 type CalibrationPhase = 'front' | 'right' | 'done'
 
@@ -60,21 +42,14 @@ const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
 
 const query = new URLSearchParams(window.location.search)
 const laptopMode = query.get('laptop') === '1'
-const webrtcLogEnabled = query.get('webrtc-log') === '1'
 const sessionId = query.get('session') ?? 'fabric-artwork-local'
 const controllerId = query.get('controller') ?? `controller-${Math.random().toString(36).slice(2, 8)}`
+const peerId = `controller-peer-${Math.random().toString(36).slice(2, 10)}`
 const artworkPeerId = query.get('artwork-peer') ?? 'artwork-runtime'
-const peerHost = query.get('peer-host') ?? window.location.hostname ?? '127.0.0.1'
-const peerSecure = query.get('peer-secure') === '1' || (
-  query.get('peer-secure') !== '0' && window.location.protocol === 'https:'
-)
-const peerPort = Number(query.get('peer-port') ?? (peerSecure ? window.location.port || 443 : 8081))
-const peerPath = query.get('peer-path') ?? '/peerjs'
-const peerConfig = buildPeerConfig(query)
-const controllerInstanceId = Math.random().toString(36).slice(2)
-const controllerClaimChannel = typeof BroadcastChannel !== 'undefined'
-  ? new BroadcastChannel('dome-control-controller')
-  : null
+const peerHost = window.location.hostname || '127.0.0.1'
+const peerSecure = window.location.protocol === 'https:'
+const peerPort = peerSecure ? Number(window.location.port || 443) : 8081
+const peerPath = '/peerjs'
 
 const direction = vec3.fromValues(0, 0, 1)
 const domemasterCursor = vec2.create()
@@ -103,129 +78,32 @@ let calibrationPhase: CalibrationPhase = 'front'
 let hasSensorSample = false
 let motionAttached = false
 let orientationSensor: AbsoluteOrientationSensorInstance | null = null
-let frameSequence = 0
-let buttonEventSequence = 0
+let inputSequence = 0
 let peer: Peer | null = null
 let controlConnection: DataConnection | null = null
 let cameraStream: MediaStream | null = null
 let transportLabel = 'Disconnected'
 let inputLabel = 'Pointer aiming active'
-let lastSentSignature = ''
 let lastSentAlignmentCross: ControllerAlignmentCross | null | undefined
 let peerReconnectTimer: number | null = null
-let supersededByNewerController = false
 let pageIsLeaving = false
-const pendingButtonEvents = new Map<number, ControllerButtonEventPacket>()
-let buttonRetryTimer: number | null = null
-const buttonRetryIntervalMs = 80
+const inputSendIntervalMs = 1000 / 60
+let forceLogNextInput = true
+let lastLoggedInputSequence = 0
+let lastLoggedAccelerate = buttons.accelerate
 
-function getQueryList(params: URLSearchParams, ...names: string[]) {
-  return names.flatMap((name) =>
-    params.getAll(name).flatMap((value) =>
-      value
-        .split(',')
-        .map((part) => part.trim())
-        .filter(Boolean),
-    ),
-  )
-}
-
-function buildPeerConfig(params: URLSearchParams): RTCConfiguration {
-  const iceServers: RTCIceServer[] = []
-  const genericIceUrls = getQueryList(params, 'ice-server', 'ice-url')
-  const stunUrls = getQueryList(params, 'stun', 'stun-url')
-  const turnUrls = getQueryList(params, 'turn', 'turn-url')
-  const turnUsername = params.get('turn-username') ?? undefined
-  const turnCredential = params.get('turn-credential') ?? undefined
-
-  if (genericIceUrls.length > 0) {
-    iceServers.push({
-      urls: genericIceUrls,
-      username: turnUsername,
-      credential: turnCredential,
-    })
-  }
-
-  if (stunUrls.length > 0) {
-    iceServers.push({ urls: stunUrls })
-  }
-
-  if (turnUrls.length > 0) {
-    iceServers.push({
-      urls: turnUrls,
-      username: turnUsername,
-      credential: turnCredential,
-    })
-  }
-
-  const requestedPolicy = params.get('ice-transport-policy') ?? params.get('ice-policy')
-  const iceTransportPolicy = requestedPolicy === 'relay' || requestedPolicy === 'all'
-    ? requestedPolicy
-    : undefined
-
-  return {
-    iceServers,
-    iceTransportPolicy,
-  }
-}
-
-function summarizePeerConfig(config: RTCConfiguration) {
-  return {
-    iceTransportPolicy: config.iceTransportPolicy ?? 'all',
-    iceServers: config.iceServers?.map((server) => ({
-      urls: server.urls,
-      hasUsername: Boolean(server.username),
-      hasCredential: Boolean(server.credential),
-    })) ?? [],
-  }
-}
-
-function logWebRtc(event: string, data?: Record<string, unknown>) {
-  if (!webrtcLogEnabled) return
-  console.info(`[dome-control/client] ${event}`, {
+function logClient(event: string, data?: Record<string, unknown>) {
+  console.info(`[${new Date().toISOString()}] [dome-control/client] ${event}`, {
+    peerId,
     controllerId,
     sessionId,
     ...data,
   })
 }
 
-function announceControllerClaim() {
-  controllerClaimChannel?.postMessage({
-    type: 'controller-claim',
-    sessionId,
-    controllerId,
-    instanceId: controllerInstanceId,
-  })
+function formatDirectionLog(values: ArrayLike<number>) {
+  return [values[0], values[1], values[2]].map((value) => Number((value ?? 0).toFixed(3)))
 }
-
-function retireSupersededController() {
-  if (supersededByNewerController) return
-  if (buttons.accelerate) {
-    buttons.accelerate = false
-    sendButtonEvent('accelerate', false)
-    queueFrameIfChanged(true)
-  }
-  sendGoodbye()
-  supersededByNewerController = true
-  destroyPeer()
-  stopButtonRetryTimer()
-  setTransportStatus('Controller superseded by newer tab')
-  logWebRtc('controller-superseded')
-}
-
-controllerClaimChannel?.addEventListener('message', (event: MessageEvent) => {
-  const data = event.data as {
-    type?: string
-    sessionId?: string
-    controllerId?: string
-    instanceId?: string
-  }
-  if (data.type !== 'controller-claim') return
-  if (data.sessionId !== sessionId) return
-  if (data.controllerId !== controllerId) return
-  if (data.instanceId === controllerInstanceId) return
-  retireSupersededController()
-})
 
 const introScreen = document.getElementById('intro-screen') as HTMLElement
 const introTitle = introScreen.querySelector('h1') as HTMLHeadingElement
@@ -321,47 +199,55 @@ function setCalibrationUi() {
   confirmAlignmentButton.disabled = false
 }
 
-function buildFrame(): ControllerFrame {
+function buildInputState(): ControllerInputState {
+  inputSequence += 1
   return {
     direction: [direction[0], direction[1], direction[2]],
-    buttons: { ...buttons },
-    sequence: frameSequence,
+    accelerate: buttons.accelerate,
+    sequence: inputSequence,
     sentAt: performance.now() * 0.001,
     color: '#8bd3ff',
   }
 }
 
-function buildFramePacket(frame: ControllerFrame): ControllerFramePacket {
+function buildInputPacket(input: ControllerInputState): ControllerInputPacket {
   return {
     protocol: DOME_CONTROL_PROTOCOL,
-    type: 'controller-frame',
+    type: 'controller-input',
     sessionId,
     controllerId,
-    frame,
+    input,
   }
 }
 
-function buildHeartbeatPacket(): ControllerHeartbeatPacket {
+function buildGoodbyePacket(): ControllerGoodbyePacket {
   return {
     protocol: DOME_CONTROL_PROTOCOL,
-    type: 'controller-heartbeat',
+    type: 'controller-goodbye',
     sessionId,
     controllerId,
     sentAt: performance.now() * 0.001,
   }
 }
 
-function buildButtonEventPacket(button: ControllerButtonKey, pressed: boolean): ControllerButtonEventPacket {
-  buttonEventSequence += 1
-  return {
-    protocol: DOME_CONTROL_PROTOCOL,
-    type: 'controller-button-event',
-    sessionId,
-    controllerId,
-    eventSeq: buttonEventSequence,
-    sentAt: performance.now() * 0.001,
-    button,
-    pressed,
+function updateDiagnostics(packet: ControllerInputPacket | ControllerAlignmentPacket | ControllerGoodbyePacket) {
+  if (controllerState) {
+    controllerState.textContent = JSON.stringify(
+      {
+        sessionId,
+        controllerId,
+        direction: [direction[0], direction[1], direction[2]],
+        accelerate: buttons.accelerate,
+        transport: transportLabel,
+        input: inputLabel,
+        calibrationPhase,
+      },
+      null,
+      2,
+    )
+  }
+  if (lastPacket) {
+    lastPacket.textContent = JSON.stringify(packet, null, 2)
   }
 }
 
@@ -376,185 +262,45 @@ function buildAlignmentPacket(cross: ControllerAlignmentCross | null): Controlle
   }
 }
 
-function isAckForThisController(packet: ControllerButtonAckPacket) {
-  return packet.sessionId === sessionId && packet.controllerId === controllerId
-}
+function sendCurrentInput() {
+  const input = buildInputState()
+  const packet = buildInputPacket(input)
 
-function buildGoodbyePacket(): ControllerGoodbyePacket {
-  return {
-    protocol: DOME_CONTROL_PROTOCOL,
-    type: 'controller-goodbye',
-    sessionId,
-    controllerId,
-    sentAt: performance.now() * 0.001,
-  }
-}
-
-function buildHelloPacket(): ControllerHelloPacket {
-  return {
-    protocol: DOME_CONTROL_PROTOCOL,
-    type: 'controller-hello',
-    sessionId,
-    controllerId,
-    label: 'dome-control-client',
-    capabilities: {
-      orientation: !laptopMode && isAbsoluteOrientationSupported(),
-      touch: true,
-      haptics: false,
-      gamepad: laptopMode,
-    },
-  }
-}
-
-function findArtworkTarget(): ArtworkRuntimeTarget | null {
-  try {
-    if (window.opener && !window.opener.closed && 'domeControlRuntime' in window.opener) {
-      return window.opener.domeControlRuntime as ArtworkRuntimeTarget
-    }
-  } catch {
-    // Ignore cross-window access failures.
-  }
-
-  try {
-    if (window.parent !== window && 'domeControlRuntime' in window.parent) {
-      return window.parent.domeControlRuntime as ArtworkRuntimeTarget
-    }
-  } catch {
-    // Ignore cross-frame access failures.
-  }
-
-  return null
-}
-
-function updateDiagnostics(frame: ControllerFrame, packet: ControllerFramePacket) {
-  if (controllerState) {
-    controllerState.textContent = JSON.stringify(
-      {
-        sessionId,
-        controllerId,
-        direction: frame.direction,
-        buttons: frame.buttons,
-        transport: transportLabel,
-        input: inputLabel,
-        calibrationPhase,
-      },
-      null,
-      2,
-    )
-  }
-  if (lastPacket) {
-    lastPacket.textContent = JSON.stringify(packet, null, 2)
-  }
-}
-
-function sendFrame() {
-  if (supersededByNewerController) return
-  const frame = buildFrame()
-  const packet = buildFramePacket(frame)
-
-  const directTarget = findArtworkTarget()
-  if (directTarget?.upsertControllerFrame) {
-    directTarget.upsertControllerFrame(controllerId, frame, 'debug-local')
-    setTransportStatus('Connected via opener/parent')
-  } else if (controlConnection?.open) {
+  if (controlConnection?.open) {
     controlConnection.send(packet)
     setTransportStatus(`Connected via PeerJS ${peerHost}:${peerPort}`)
   } else {
     setTransportStatus('Disconnected')
   }
 
-  updateDiagnostics(frame, packet)
+  if (
+    forceLogNextInput
+    || input.accelerate !== lastLoggedAccelerate
+    || (input.sequence ?? 0) - lastLoggedInputSequence >= 120
+  ) {
+    logClient('input-send', {
+      sequence: input.sequence,
+      accelerate: input.accelerate,
+      direction: formatDirectionLog(input.direction),
+      connectionOpen: Boolean(controlConnection?.open),
+    })
+    forceLogNextInput = false
+    lastLoggedInputSequence = input.sequence ?? lastLoggedInputSequence
+    lastLoggedAccelerate = input.accelerate
+  }
+
+  updateDiagnostics(packet)
 }
 
 function sendAlignment(cross: ControllerAlignmentCross | null, force = false) {
-  if (supersededByNewerController) return
   if (!force && lastSentAlignmentCross === cross) return
   lastSentAlignmentCross = cross
 
-  const directTarget = findArtworkTarget()
-  if (directTarget?.showControllerAlignment) {
-    directTarget.showControllerAlignment(controllerId, cross)
-    return
-  }
   if (controlConnection?.open) {
-    controlConnection.send(buildAlignmentPacket(cross))
-  }
-}
-
-function sendHeartbeat() {
-  if (supersededByNewerController) return
-  const packet = buildHeartbeatPacket()
-  const directTarget = findArtworkTarget()
-  if (directTarget?.upsertControllerFrame) {
-    return
-  }
-  if (controlConnection?.open) {
+    const packet = buildAlignmentPacket(cross)
     controlConnection.send(packet)
+    updateDiagnostics(packet)
   }
-}
-
-function sendButtonEvent(button: ControllerButtonKey, pressed: boolean) {
-  if (supersededByNewerController) return
-  const packet = buildButtonEventPacket(button, pressed)
-  const directTarget = findArtworkTarget()
-  if (directTarget?.applyControllerButtonEvent) {
-    directTarget.applyControllerButtonEvent(controllerId, button, pressed, packet.sentAt)
-    if (lastPacket) {
-      lastPacket.textContent = JSON.stringify(packet, null, 2)
-    }
-    return
-  }
-
-  pendingButtonEvents.set(packet.eventSeq, packet)
-  startButtonRetryTimer()
-  sendPendingButtonEvent(packet)
-}
-
-function sendPendingButtonEvent(packet: ControllerButtonEventPacket) {
-  if (controlConnection?.open && pendingButtonEvents.has(packet.eventSeq)) {
-    controlConnection.send(packet)
-    if (lastPacket) {
-      lastPacket.textContent = JSON.stringify(packet, null, 2)
-    }
-  }
-}
-
-function startButtonRetryTimer() {
-  if (buttonRetryTimer != null) return
-  buttonRetryTimer = window.setInterval(() => {
-    if (pendingButtonEvents.size === 0) {
-      stopButtonRetryTimer()
-      return
-    }
-    for (const packet of pendingButtonEvents.values()) {
-      sendPendingButtonEvent(packet)
-    }
-  }, buttonRetryIntervalMs)
-}
-
-function stopButtonRetryTimer() {
-  if (buttonRetryTimer == null) return
-  window.clearInterval(buttonRetryTimer)
-  buttonRetryTimer = null
-}
-
-function handleButtonAck(packet: ControllerButtonAckPacket) {
-  if (!isAckForThisController(packet)) return
-  pendingButtonEvents.delete(packet.eventSeq)
-  if (pendingButtonEvents.size === 0) {
-    stopButtonRetryTimer()
-  }
-}
-
-function queueFrameIfChanged(force = false) {
-  const signature = JSON.stringify({
-    direction: [direction[0], direction[1], direction[2]],
-    buttons,
-  })
-  if (!force && signature === lastSentSignature) return
-  lastSentSignature = signature
-  frameSequence += 1
-  sendFrame()
 }
 
 function syncCursorFromDirection() {
@@ -573,7 +319,6 @@ function applyControllerDirection(nextDirection: vec3, modeLabel: string) {
 
   syncCursorFromDirection()
   setInputStatus(modeLabel)
-  queueFrameIfChanged()
 }
 
 function updateAimFromPointer(x: number, y: number) {
@@ -587,7 +332,6 @@ function updateAimFromPointer(x: number, y: number) {
   domemasterToCamDir(direction, [cx, cy])
   syncCursorFromDirection()
   setInputStatus(laptopMode ? 'Laptop joystick active' : 'Pointer aiming active')
-  queueFrameIfChanged()
 }
 
 function currentScreenAngleRadians() {
@@ -822,8 +566,6 @@ function initializeButtons() {
       if (buttons[spec.key] === pressed) return
       buttons[spec.key] = pressed
       button.classList.toggle('is-active', pressed)
-      sendButtonEvent(spec.key, pressed)
-      queueFrameIfChanged(true)
     }
     const releasePointer = (pointerId: number) => {
       if (button.hasPointerCapture(pointerId)) {
@@ -870,15 +612,15 @@ function initializeButtons() {
 function initializeAimPad() {
   if (!aimPad) return
   let activePointerId: number | null = null
+  let laptopPointerHeld = false
 
   const setLaptopAccelerating = (pressed: boolean) => {
-    if (!laptopMode || buttons.accelerate === pressed) return
-    buttons.accelerate = pressed
-    sendButtonEvent('accelerate', pressed)
-    queueFrameIfChanged(true)
-  }
-  const syncLaptopButtonState = (buttonsMask: number) => {
-    setLaptopAccelerating((buttonsMask & 1) !== 0)
+    if (!laptopMode) return
+    laptopPointerHeld = pressed
+    if (buttons.accelerate === laptopPointerHeld) {
+      return
+    }
+    buttons.accelerate = laptopPointerHeld
   }
   const updateFromEvent = (event: PointerEvent) => {
     event.preventDefault()
@@ -897,15 +639,12 @@ function initializeAimPad() {
   aimPad.addEventListener('pointerdown', (event) => {
     aimPad.setPointerCapture(event.pointerId)
     activePointerId = event.pointerId
+    setLaptopAccelerating(true)
     updateFromEvent(event)
-    syncLaptopButtonState(event.buttons || 1)
   })
   aimPad.addEventListener('pointermove', (event) => {
     if (laptopMode || (event.buttons & 1) !== 0) {
       updateFromEvent(event)
-      if (activePointerId === event.pointerId || laptopMode) {
-        syncLaptopButtonState(event.buttons)
-      }
     }
   })
   aimPad.addEventListener('pointerup', (event) => {
@@ -918,7 +657,6 @@ function initializeAimPad() {
     if (activePointerId === event.pointerId) {
       activePointerId = null
     }
-    setLaptopAccelerating(false)
   })
   window.addEventListener('mouseup', () => {
     setLaptopAccelerating(false)
@@ -941,7 +679,6 @@ function clearPeerReconnectTimer() {
 }
 
 function schedulePeerReconnect(delayMs = 1500) {
-  if (supersededByNewerController) return
   if (pageIsLeaving) return
   if (peerReconnectTimer != null) return
   peerReconnectTimer = window.setTimeout(() => {
@@ -955,40 +692,17 @@ function schedulePeerReconnect(delayMs = 1500) {
 }
 
 function attachConnection(connection: DataConnection) {
-  if (supersededByNewerController) {
-    connection.close()
-    return
-  }
   controlConnection = connection
-  logWebRtc('connection-created', {
-    label: connection.label,
-    peer: connection.peer,
-  })
 
   connection.on('open', () => {
     clearPeerReconnectTimer()
     setTransportStatus(`Connected via PeerJS ${peerHost}:${peerPort}`)
-    logWebRtc('connection-open', {
-      label: connection.label,
-      peer: connection.peer,
+    logClient('connection-open', {
+      remotePeerId: connection.peer,
     })
-    connection.send(buildHelloPacket())
+    forceLogNextInput = true
     sendAlignment(calibrationPhase === 'done' ? null : calibrationPhase, true)
-    for (const packet of pendingButtonEvents.values()) {
-      sendPendingButtonEvent(packet)
-    }
-    queueFrameIfChanged(true)
-  })
-
-  connection.on('data', (data) => {
-    logWebRtc('connection-data', {
-      peer: connection.peer,
-      type: isDomeControlPacket(data) ? data.type : typeof data,
-    })
-    if (!isDomeControlPacket(data)) return
-    if (data.type === 'controller-button-ack') {
-      handleButtonAck(data)
-    }
+    sendCurrentInput()
   })
 
   connection.on('close', () => {
@@ -996,40 +710,39 @@ function attachConnection(connection: DataConnection) {
       controlConnection = null
     }
     setTransportStatus('PeerJS connection closed')
-    logWebRtc('connection-close', {
-      label: connection.label,
-      peer: connection.peer,
+    logClient('connection-close', {
+      remotePeerId: connection.peer,
     })
     schedulePeerReconnect()
   })
 
   connection.on('error', (error) => {
-    logWebRtc('connection-error', {
-      label: connection.label,
-      peer: connection.peer,
+    setTransportStatus('PeerJS connection error')
+    logClient('connection-error', {
+      remotePeerId: connection.peer,
       error: error instanceof Error ? error.message : String(error),
     })
-    setTransportStatus('PeerJS connection error')
     schedulePeerReconnect()
   })
 }
 
 function openArtworkConnection() {
-  if (supersededByNewerController) return
   if (!peer || !peer.open || peer.destroyed) return
   if (controlConnection?.open) return
 
   controlConnection?.close()
+  logClient('connect-attempt', {
+    artworkPeerId,
+  })
   const connection = peer.connect(artworkPeerId, {
     label: 'dome-control',
-    metadata: { sessionId, controllerId },
+    metadata: { sessionId, controllerId, peerId },
     reliable: true,
     serialization: 'json',
   })
 
   const timeoutId = window.setTimeout(() => {
     if (!connection.open && controlConnection === connection) {
-      logWebRtc('connection-timeout', { peer: connection.peer })
       connection.close()
       schedulePeerReconnect()
     }
@@ -1059,47 +772,37 @@ function destroyPeer() {
 }
 
 function connectPeerServer() {
-  if (supersededByNewerController) return
   destroyPeer()
   setTransportStatus(`Connecting via PeerJS ${peerHost}:${peerPort}`)
-  logWebRtc('peer-connecting', {
-    peerHost,
-    peerPort,
-    peerPath,
-    peerSecure,
-    peerConfig: summarizePeerConfig(peerConfig),
-  })
 
-  peer = new Peer(controllerId, {
+  peer = new Peer(peerId, {
     host: peerHost,
     port: peerPort,
     path: peerPath,
     secure: peerSecure,
-    debug: webrtcLogEnabled ? 3 : 1,
-    config: peerConfig,
   })
 
   peer.on('open', (id) => {
     setTransportStatus(`PeerJS ready ${id}`)
-    logWebRtc('peer-open', { id })
+    logClient('peer-open', { id })
     openArtworkConnection()
   })
 
   peer.on('disconnected', () => {
     setTransportStatus('PeerJS disconnected')
-    logWebRtc('peer-disconnected')
+    logClient('peer-disconnected')
     schedulePeerReconnect()
   })
 
   peer.on('close', () => {
     setTransportStatus('PeerJS closed')
-    logWebRtc('peer-close')
+    logClient('peer-close')
     schedulePeerReconnect()
   })
 
   peer.on('error', (error) => {
     setTransportStatus('PeerJS error')
-    logWebRtc('peer-error', {
+    logClient('peer-error', {
       error: error instanceof Error ? error.message : String(error),
     })
     schedulePeerReconnect()
@@ -1109,12 +812,6 @@ function connectPeerServer() {
 function sendGoodbye() {
   sendAlignment(null, true)
   const packet = buildGoodbyePacket()
-  const directTarget = findArtworkTarget()
-  if (directTarget?.removeController) {
-    directTarget.removeController(controllerId)
-    return
-  }
-
   if (controlConnection?.open) {
     controlConnection.send(packet)
   }
@@ -1136,14 +833,12 @@ window.addEventListener('pagehide', () => {
   pageIsLeaving = true
   sendGoodbye()
   destroyPeer()
-  stopButtonRetryTimer()
 })
 
 window.addEventListener('beforeunload', () => {
   pageIsLeaving = true
   sendGoodbye()
   destroyPeer()
-  stopButtonRetryTimer()
 })
 
 window.addEventListener('pageshow', (event) => {
@@ -1154,7 +849,6 @@ window.addEventListener('pageshow', (event) => {
 
 initializeButtons()
 initializeAimPad()
-announceControllerClaim()
 if (laptopMode) {
   calibrationPhase = 'done'
   setInputStatus('Laptop joystick active')
@@ -1167,23 +861,21 @@ if (laptopMode) {
   }
 }
 syncCursorFromDirection()
-setCalibrationUi()
+if (laptopMode) {
+  setCalibrationUi()
+}
 connectPeerServer()
-queueFrameIfChanged(true)
+sendCurrentInput()
 
 let lastHeartbeatTick = Date.now()
 
 window.setInterval(() => {
   const now = Date.now()
-  // Relax threshold to 20s to avoid loops during mobile browser throttling.
-  // Also don't trip if the document is hidden as throttling is expected there.
   if (now - lastHeartbeatTick > 20000 && !document.hidden) {
-    logWebRtc('resume-detected', { gap: now - lastHeartbeatTick })
     destroyPeer()
     schedulePeerReconnect(2000)
   }
   lastHeartbeatTick = now
 
-  queueFrameIfChanged(true)
-  sendHeartbeat()
-}, 250)
+  sendCurrentInput()
+}, inputSendIntervalMs)

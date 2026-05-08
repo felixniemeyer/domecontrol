@@ -235,6 +235,11 @@ button[hidden] {
   display: grid;
   place-items: center;
   background: #090b10;
+  cursor: none;
+}
+
+.screen--control[data-mode="laptop"] * {
+  cursor: none;
 }
 
 .control-shell {
