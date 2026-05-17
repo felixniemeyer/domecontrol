@@ -36,6 +36,20 @@ type AbsoluteOrientationSensorConstructor = new (
   options?: AbsoluteOrientationSensorOptions,
 ) => AbsoluteOrientationSensorInstance
 
+type OrientationLockRequest =
+  | 'any'
+  | 'natural'
+  | 'landscape'
+  | 'portrait'
+  | 'portrait-primary'
+  | 'portrait-secondary'
+  | 'landscape-primary'
+  | 'landscape-secondary'
+
+type ScreenOrientationWithLock = ScreenOrientation & {
+  lock?: (orientation: OrientationLockRequest) => Promise<void>
+}
+
 const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
   { key: 'accelerate', label: 'Accelerate' },
 ]
@@ -75,6 +89,7 @@ const calibrationSamples: Record<'front' | 'right', CalibrationSample | null> = 
 }
 
 let calibrationPhase: CalibrationPhase = 'front'
+let calibrationActive = false
 let hasSensorSample = false
 let motionAttached = false
 let orientationSensor: AbsoluteOrientationSensorInstance | null = null
@@ -111,6 +126,7 @@ const calibrationScreen = document.getElementById('calibration-screen') as HTMLE
 const controlScreen = document.getElementById('control-screen') as HTMLElement
 const calibrationPreview = document.getElementById('calibration-preview') as HTMLDivElement
 const calibrationHeading = document.getElementById('calibration-heading') as HTMLParagraphElement
+const calibrationCrossShape = document.querySelector<SVGPathElement>('#calibration-cross-shape')!
 const aimPad = document.getElementById('aim-pad') as HTMLDivElement
 const aimCursor = document.getElementById('aim-cursor') as HTMLDivElement
 const buttonGrid = document.getElementById('button-grid') as HTMLDivElement
@@ -126,6 +142,61 @@ const calibrationCamera = document.getElementById('calibration-camera') as HTMLV
 const startCalibrationButton = document.getElementById('start-calibration') as HTMLButtonElement
 const backCalibrationButton = document.getElementById('back-calibration') as HTMLButtonElement
 const confirmAlignmentButton = document.getElementById('confirm-alignment') as HTMLButtonElement
+const recalibrateButton = document.getElementById('recalibrate') as HTMLButtonElement
+
+function preventLongPressBrowserAction(event: Event) {
+  event.preventDefault()
+}
+
+type Vec2 = readonly [number, number]
+
+function pathFromPoints(points: Vec2[]) {
+  const [[startX, startY], ...rest] = points
+  return `M ${startX.toFixed(3)} ${startY.toFixed(3)} ${rest
+    .map(([x, y]) => `L ${x.toFixed(3)} ${y.toFixed(3)}`)
+    .join(' ')} Z`
+}
+
+function buildAxisArrowPath(
+  center: Vec2,
+  axis: Vec2,
+  radius: number,
+  halfWidth: number,
+  notchDepth: number,
+) {
+  const [cx, cy] = center
+  const [ax, ay] = axis
+  const px = -ay
+  const py = ax
+  const tailAlong = Math.sqrt(Math.max(0, radius * radius - halfWidth * halfWidth))
+
+  const point = (along: number, across: number): Vec2 => [
+    cx + ax * along + px * across,
+    cy + ay * along + py * across,
+  ]
+
+  return pathFromPoints([
+    point(-tailAlong, -halfWidth),
+    point(radius - notchDepth, -halfWidth),
+    point(radius, 0),
+    point(radius - notchDepth, halfWidth),
+    point(-tailAlong, halfWidth),
+    point(-tailAlong + notchDepth, 0),
+  ])
+}
+
+function buildCalibrationCrossPath() {
+  const center: Vec2 = [50, 50]
+  const radius = 43
+  const halfWidth = 5.5
+  const notchDepth = 11
+  return [
+    buildAxisArrowPath(center, [1, 0], radius, halfWidth, notchDepth),
+    buildAxisArrowPath(center, [0, -1], radius, halfWidth, notchDepth),
+  ].join(' ')
+}
+
+calibrationCrossShape.setAttribute('d', buildCalibrationCrossPath())
 
 function setTransportStatus(label: string) {
   transportLabel = label
@@ -138,6 +209,7 @@ function setInputStatus(label: string) {
 }
 
 function setUnsupportedOrientationUi() {
+  calibrationActive = false
   setActiveScreen('intro')
   introTitle.textContent = "Your browser or phone does not support absolute orientation measuring. We're sorry."
   startCalibrationButton.hidden = true
@@ -156,6 +228,7 @@ function setCalibrationUi() {
     setActiveScreen('control')
     controlScreen.dataset.mode = 'laptop'
     laptopJoystickPanel.hidden = false
+    recalibrateButton.hidden = true
     controlEyebrow.textContent = 'dome-control'
     controlTitle.textContent = 'Laptop controls'
     controlCopy.textContent = 'Laptop mode: drag the joystick to aim and hold accelerate.'
@@ -165,9 +238,10 @@ function setCalibrationUi() {
   setActiveScreen(calibrationPhase === 'done' ? 'control' : 'calibration')
   controlScreen.dataset.mode = 'phone'
   laptopJoystickPanel.hidden = true
+  recalibrateButton.hidden = calibrationPhase !== 'done'
   controlEyebrow.textContent = 'dome-control'
   controlTitle.textContent = 'Phone controls'
-  controlCopy.textContent = 'Use phone orientation and hold accelerate.'
+  controlCopy.textContent = 'Point your phone into the direction you want to go and accelerate.'
   calibrationPreview.hidden = false
   confirmAlignmentButton.hidden = calibrationPhase === 'done'
   backCalibrationButton.hidden = calibrationPhase === 'done'
@@ -405,6 +479,7 @@ function resetCalibration() {
   vec3.zero(basisRight)
   vec3.zero(basisUp)
   calibrationPhase = 'front'
+  calibrationActive = true
   setInputStatus('Awaiting phone calibration')
   setCalibrationUi()
 }
@@ -446,6 +521,40 @@ function isAbsoluteOrientationSupported() {
   return typeof getAbsoluteOrientationSensorConstructor() === 'function'
 }
 
+function isMobileViewport() {
+  return window.matchMedia('(hover: none), (pointer: coarse)').matches
+}
+
+async function enterImmersiveMobileMode() {
+  const fullscreenTarget = document.documentElement
+  try {
+    if (!document.fullscreenElement && fullscreenTarget.requestFullscreen) {
+      await fullscreenTarget.requestFullscreen({ navigationUI: 'hide' })
+    }
+  } catch (error) {
+    logClient('fullscreen-unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  if (!isMobileViewport()) {
+    return
+  }
+
+  const orientation = screen.orientation as ScreenOrientationWithLock | undefined
+  if (!orientation?.lock) {
+    return
+  }
+
+  try {
+    await orientation.lock('portrait-primary')
+  } catch (error) {
+    logClient('orientation-lock-unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 function onAbsoluteOrientationReading() {
   if (!orientationSensor?.quaternion || orientationSensor.quaternion.length < 4) {
     return
@@ -467,11 +576,13 @@ function onAbsoluteOrientationReading() {
   if (calibrationPhase === 'done') {
     projectVectorIntoCalibration(calibratedForward, rawForward)
     applyControllerDirection(calibratedForward, 'Motion aiming active')
-  } else {
-    setInputStatus('Motion sample ready for calibration')
+    return
   }
 
-  setCalibrationUi()
+  if (calibrationActive) {
+    setInputStatus('Motion sample ready for calibration')
+    setCalibrationUi()
+  }
 }
 
 async function enableMotion() {
@@ -524,6 +635,7 @@ async function enableCamera() {
 
 async function startCalibration() {
   if (laptopMode) return
+  await enterImmersiveMobileMode()
   if (!isAbsoluteOrientationSupported()) {
     setUnsupportedOrientationUi()
     return
@@ -533,6 +645,7 @@ async function startCalibration() {
     const motionEnabled = await enableMotion()
     if (!motionEnabled) return
     await enableCamera()
+    calibrationActive = true
     setActiveScreen('calibration')
     setInputStatus('Phone calibration active')
     setCalibrationUi()
@@ -543,6 +656,11 @@ async function startCalibration() {
 
 function stepBackCalibration() {
   if (calibrationPhase === 'front') {
+    calibrationActive = false
+    hasSensorSample = false
+    sendAlignment(null)
+    calibrationPreview.hidden = true
+    confirmAlignmentButton.disabled = true
     setActiveScreen('intro')
     return
   }
@@ -828,6 +946,14 @@ backCalibrationButton.addEventListener('click', () => {
 confirmAlignmentButton.addEventListener('click', () => {
   confirmCalibrationStep()
 })
+
+recalibrateButton.addEventListener('click', () => {
+  resetCalibration()
+})
+
+document.addEventListener('contextmenu', preventLongPressBrowserAction)
+document.addEventListener('selectstart', preventLongPressBrowserAction)
+document.addEventListener('dragstart', preventLongPressBrowserAction)
 
 window.addEventListener('pagehide', () => {
   pageIsLeaving = true

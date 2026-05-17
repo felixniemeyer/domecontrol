@@ -9,7 +9,7 @@
     <main class="app">
       <section id="intro-screen" class="screen screen--intro">
         <div class="intro-shell">
-          <p class="control-shell__eyebrow">dome-control</p>
+          <p class="screen-eyebrow">dome-control</p>
           <h1>Calibrate your phone to the dome</h1>
           <button id="start-calibration" type="button">Start</button>
         </div>
@@ -20,15 +20,12 @@
           <div id="calibration-preview" class="calibration-preview">
             <video id="calibration-camera" autoplay playsinline muted></video>
             <div class="calibration-preview__cross-wrap">
-              <p id="calibration-heading" class="calibration-heading">front</p>
+              <div class="calibration-card">
+                <p id="calibration-heading" class="calibration-heading">front</p>
+                <p class="calibration-copy">Point the cross to the equal color cross on the dome and confirm</p>
+              </div>
               <svg class="calibration-preview__cross" viewBox="0 0 100 100" aria-hidden="true">
-                <defs>
-                  <marker id="cross-arrowhead-centered" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 1 1 L 7 4 L 1 7 z" fill="context-stroke" />
-                  </marker>
-                </defs>
-                <line x1="50" y1="82" x2="50" y2="18" marker-end="url(#cross-arrowhead-centered)" />
-                <line x1="18" y1="50" x2="82" y2="50" marker-end="url(#cross-arrowhead-centered)" />
+                <path id="calibration-cross-shape" class="calibration-cross-shape" />
               </svg>
             </div>
           </div>
@@ -46,14 +43,12 @@
         <div class="control-shell">
           <header class="control-shell__header">
             <div>
-              <p id="control-eyebrow" class="control-shell__eyebrow">dome-control</p>
+              <p id="control-eyebrow" class="screen-eyebrow">dome-control</p>
               <h1 id="control-title">Phone controls</h1>
-            </div>
-            <div class="control-shell__meta">
-              <p id="transport-status">Connecting…</p>
-              <p id="input-status">Waiting for control</p>
+              <p id="control-copy">Point your phone into the direction you want to go and accelerate.</p>
             </div>
           </header>
+          <button id="recalibrate" class="recalibrate-button" type="button">Recalibrate</button>
 
           <section id="laptop-joystick-panel" class="joystick-panel" hidden>
             <div class="joystick-panel__header">
@@ -69,7 +64,6 @@
           <section class="button-panel">
             <div class="button-panel__header">
               <h2>Controls</h2>
-              <p id="control-copy">Use phone orientation and hold accelerate.</p>
             </div>
             <div id="button-grid" class="button-grid"></div>
           </section>
@@ -77,6 +71,8 @@
 
         <pre id="controller-state" hidden></pre>
         <pre id="last-packet" hidden></pre>
+        <p id="transport-status" hidden>Connecting…</p>
+        <p id="input-status" hidden>Waiting for control</p>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

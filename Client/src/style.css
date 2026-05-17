@@ -5,6 +5,10 @@
   color: #f7f5ef;
 }
 
+html {
+  min-height: 100%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -12,6 +16,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 30%),
     #0d1017;
@@ -23,6 +28,7 @@ button,
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
+  -webkit-user-drag: none;
   user-select: none;
 }
 
@@ -43,16 +49,41 @@ button:active {
   transform: scale(0.98);
 }
 
-button[hidden] {
-  display: none;
+[hidden] {
+  display: none !important;
+}
+
+p {
+  margin: 0;
+  color: rgba(247, 245, 239, 0.78);
+  line-height: 1.45;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  line-height: 0.95;
+}
+
+p + h1,
+p + h2 {
+  margin-top: 0.55rem;
+}
+
+h1 + p,
+h2 + p {
+  margin-top: 0.85rem;
 }
 
 .app {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .screen {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .screen--intro {
@@ -69,12 +100,14 @@ button[hidden] {
   width: min(32rem, 100%);
   margin: 0 auto;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.25rem;
 }
 
 .intro-shell {
   width: min(32rem, 100%);
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: 1.25rem;
   display: grid;
@@ -94,33 +127,19 @@ button[hidden] {
   position: relative;
   width: 100%;
   max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   padding: 0;
   z-index: 0;
+  overflow: hidden;
 }
 
-.control-shell__eyebrow {
-  margin: 0;
+.screen-eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-size: 0.78rem;
   opacity: 0.72;
-}
-
-.intro-shell h1,
-.control-shell h1,
-.button-panel h2,
-.joystick-panel h2 {
-  margin: 0;
-  font-size: clamp(2rem, 7vw, 3.25rem);
-  line-height: 0.95;
-}
-
-.control-shell__meta p,
-.button-panel p,
-.joystick-panel p {
-  margin: 0;
-  color: rgba(247, 245, 239, 0.78);
-  line-height: 1.45;
 }
 
 .calibration-preview {
@@ -128,10 +147,6 @@ button[hidden] {
   inset: 0;
   overflow: hidden;
   background: rgba(3, 5, 9, 0.75);
-}
-
-.calibration-preview[hidden] {
-  display: none;
 }
 
 .calibration-preview video {
@@ -156,33 +171,54 @@ button[hidden] {
   place-items: center;
 }
 
-.calibration-heading {
+.calibration-card {
   position: absolute;
-  top: 10%;
+  top: 5vw;
   left: 50%;
   transform: translateX(-50%);
+  width: min(90vw, 30rem);
+  height: 42.5vw;
+  padding: 0.9rem 1rem;
+  border: 0.28rem solid var(--cross-color);
+  border-radius: 1rem;
+  background: rgba(8, 11, 16, 0.62);
+  color: #f7f5ef;
+  text-align: center;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--cross-color) 18%, transparent);
+  display: grid;
+  align-content: center;
+}
+
+.calibration-heading {
   margin: 0;
-  font-size: 1.6rem;
+  font-size: clamp(1.5rem, 7vw, 2.4rem);
   font-weight: 800;
-  letter-spacing: 0.08em;
+  line-height: 0.95;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--cross-color);
-  opacity: 0.75;
   text-shadow: 0 0 18px color-mix(in srgb, var(--cross-color) 44%, transparent);
 }
 
-.calibration-preview__cross {
-  width: min(62vw, 62vh);
-  height: min(62vw, 62vh);
-  overflow: visible;
-  stroke: var(--cross-color);
-  fill: var(--cross-color);
-  opacity: 0.75;
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--cross-color) 40%, transparent));
+.calibration-copy {
+  margin: 0.45rem 0 0;
+  font-size: clamp(0.82rem, 3.4vw, 1rem);
+  line-height: 1.25;
+  color: rgba(247, 245, 239, 0.82);
 }
 
-.calibration-preview__cross line {
-  stroke-width: 1.8;
-  stroke-linecap: butt;
+.calibration-preview__cross {
+  width: min(70vw, 58vh);
+  height: min(70vw, 58vh);
+  overflow: visible;
+  fill: var(--cross-color);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--cross-color) 48%, transparent));
+}
+
+.calibration-cross-shape {
+  vector-effect: non-scaling-stroke;
 }
 
 .screen--calibration[data-phase="front"] {
@@ -195,17 +231,20 @@ button[hidden] {
 
 .screen__actions {
   position: absolute;
-  left: 1rem;
-  right: 1rem;
-  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 5vw;
+  right: 5vw;
+  bottom: max(5vw, env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  grid-template-columns: 42.5vw 42.5vw;
+  gap: 5vw;
   pointer-events: auto;
 }
 
 .screen__actions button {
-  min-height: 3.5rem;
+  width: 42.5vw;
+  height: 42.5vw;
+  min-height: 0;
+  padding: 0;
   background: rgba(8, 11, 16, 0.68);
   color: #f7f5ef;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -236,6 +275,7 @@ button[hidden] {
   place-items: center;
   background: #090b10;
   cursor: none;
+  overflow: hidden;
 }
 
 .screen--control[data-mode="laptop"] * {
@@ -244,10 +284,13 @@ button[hidden] {
 
 .control-shell {
   display: grid;
-  align-content: start;
+  grid-template-rows: auto 1fr auto;
+  align-content: stretch;
   gap: 1rem;
   padding-top: 1.5rem;
   padding-bottom: 2rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .control-shell__header,
@@ -260,24 +303,22 @@ button[hidden] {
   backdrop-filter: blur(14px);
 }
 
-.control-shell__header {
-  display: grid;
-  gap: 0.85rem;
-}
-
-.control-shell__meta {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.joystick-panel[hidden] {
-  display: none;
+.recalibrate-button {
+  justify-self: stretch;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f7f5ef;
+  border-radius: 0.75rem;
+  backdrop-filter: blur(14px);
 }
 
 .joystick-panel,
 .button-panel {
   display: grid;
   gap: 1rem;
+  align-self: end;
 }
 
 .screen--control[data-mode="laptop"] .control-shell {
@@ -347,16 +388,20 @@ button[hidden] {
 
 .button-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 0.8rem;
 }
 
 .button-grid button {
-  min-height: 5rem;
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
   color: #f7f5ef;
   touch-action: none;
+  font-size: clamp(1.5rem, 8vw, 2.6rem);
 }
 
 .button-grid button:first-child {
@@ -366,10 +411,6 @@ button[hidden] {
 .button-grid button.is-active {
   background: #ffd76a;
   color: #16130a;
-}
-
-pre[hidden] {
-  display: none;
 }
 
 @media (min-width: 720px) {
