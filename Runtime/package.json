@@ -1,7 +1,7 @@
 {
   "name": "dome-control-runtime",
-  "private": true,
-  "version": "0.0.0",
+  "private": false,
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,5 +11,17 @@
   },
   "dependencies": {
     "gl-matrix": "^3.4.3"
+  },
+  "license": "MIT",
+  "description": "Runtime types, packet definitions and domemaster math for the dome-control fulldome controller protocol.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }

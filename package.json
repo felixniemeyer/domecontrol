@@ -1,6 +1,6 @@
 {
   "name": "dome-control-tests",
-  "private": true,
+  "private": false,
   "version": "0.0.0",
   "scripts": {
     "test-env:check": "node ./scripts/check-test-ports.mjs",
