@@ -1,21 +1,32 @@
 {
   "name": "dome-control-server",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "PeerJS/WebRTC signalling server for dome-control fulldome controllers.",
+  "license": "MIT",
+  "author": "felix niemeyer",
   "type": "module",
+  "main": "./dist/server.cjs",
+  "bin": {
+    "dome-control-server": "./dist/server.cjs"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "node --loader ts-node/esm src/server.ts",
     "start": "node --loader ts-node/esm src/server.ts",
-    "build": "tsc --noEmit"
+    "build": "esbuild src/server.ts --bundle --platform=node --format=cjs --target=node18 --packages=external --outfile=dist/server.cjs --banner:js=\"#!/usr/bin/env node\"",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "peer": "^1.0.2",
-    "ts-node": "^10.9.2",
     "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.8",
     "@types/ws": "^8.5.14",
+    "esbuild": "^0.28.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
   }
 }
