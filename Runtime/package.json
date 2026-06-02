@@ -1,5 +1,5 @@
 {
-  "name": "dome-control-runtime",
+  "name": "@dome-control/runtime",
   "private": false,
   "version": "0.1.0",
   "type": "module",
@@ -23,5 +23,8 @@
   ],
   "devDependencies": {
     "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

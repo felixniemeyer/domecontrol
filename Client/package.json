@@ -1,12 +1,22 @@
 {
-  "name": "dome-control-client",
-  "private": true,
-  "version": "0.0.0",
+  "name": "@dome-control/client",
+  "version": "0.1.0",
+  "description": "Phone/browser controller client for dome-control fulldome games (device-orientation cursor over PeerJS/WebRTC).",
+  "license": "MIT",
+  "author": "felix niemeyer",
   "type": "module",
+  "bin": {
+    "dome-control-client": "./bin/serve.mjs"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^1.2.0",
@@ -16,5 +26,8 @@
   "dependencies": {
     "gl-matrix": "^3.4.3",
     "peerjs": "^1.5.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
