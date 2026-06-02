@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "test-env:check": "node ./scripts/check-test-ports.mjs",
-    "test-env": "npm run test-env:check && ../node_modules/.bin/concurrently -k -n DOME-SERVER,ARTWORK,CLIENT -c blue,magenta,green \"PORT=18081 HOST=127.0.0.1 npm --prefix ./Server run start\" \"VITE_PEER_PORT=18081 npm --prefix ./ArtworkStub run dev -- --host 127.0.0.1 --port 14173\" \"PEER_PROXY_PORT=18081 npm --prefix ./Client run dev -- --host 127.0.0.1 --port 15176\"",
+    "test-env": "npm run test-env:check && ../node_modules/.bin/concurrently -k -n DOME-SERVER,ARTWORK,CLIENT -c blue,magenta,green \"PORT=18081 HOST=127.0.0.1 npm --prefix ./server run start\" \"VITE_PEER_PORT=18081 npm --prefix ./ArtworkStub run dev -- --host 127.0.0.1 --port 14173\" \"PEER_PROXY_PORT=18081 npm --prefix ./client run dev -- --host 127.0.0.1 --port 15176\"",
     "test:wait": "node ./scripts/wait-for-test-env.mjs",
     "test": "npm run test:wait && ../node_modules/.bin/playwright test --config ./playwright.config.ts"
   }
