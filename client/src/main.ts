@@ -12,7 +12,7 @@ import {
   type ControllerInputPacket,
   type ControllerInputState,
   type ControllerGoodbyePacket,
-} from '../../Runtime/src/index'
+} from '@dome-control/runtime'
 
 type CalibrationPhase = 'front' | 'right' | 'done'
 

@@ -6,7 +6,7 @@
   "author": "felix niemeyer",
   "type": "module",
   "bin": {
-    "dome-control-client": "./bin/serve.mjs"
+    "dome-control-client": "bin/serve.mjs"
   },
   "files": [
     "dist",
@@ -19,6 +19,7 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
+    "@dome-control/runtime": "^0.1.0",
     "@vitejs/plugin-basic-ssl": "^1.2.0",
     "typescript": "^5.2.2",
     "vite": "^5.3.4"

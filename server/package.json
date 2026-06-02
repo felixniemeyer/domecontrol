@@ -7,7 +7,7 @@
   "type": "module",
   "main": "./dist/server.cjs",
   "bin": {
-    "dome-control-server": "./dist/server.cjs"
+    "dome-control-server": "dist/server.cjs"
   },
   "files": [
     "dist"
