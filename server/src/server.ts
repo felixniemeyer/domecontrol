@@ -1,9 +1,17 @@
 import { PeerServer } from 'peer'
+import { createArtworkRegistry } from './registry.ts'
 
 const port = Number(process.env.PORT ?? 8081)
 const host = process.env.HOST ?? '127.0.0.1'
 const path = process.env.PEER_PATH ?? '/peerjs'
 const webrtcLogEnabled = process.env.WEBRTC_LOG === '1'
+
+// Registry runs on its own port to avoid contending with PeerJS for the
+// shared HTTP server's 'upgrade' event. Controllers behind an https dev server
+// reach it through a ws-proxy; http artworks connect directly.
+const registryPort = Number(process.env.REGISTRY_PORT ?? 8082)
+// Keep in sync with REGISTRY_PATH in @dome-control/runtime.
+const registryPath = process.env.REGISTRY_PATH ?? '/registry'
 
 let lastLogSignature: string | null = null
 let repeatedLogCount = 0
@@ -80,6 +88,10 @@ peerServer.on('error', (error) => {
   console.error(`[${timestamp()}] [dome-control/server] error`, error)
 })
 
+// Artwork registry (discovery only; controller input stays peer-to-peer).
+createArtworkRegistry({ host, port: registryPort, path: registryPath, log: logConnection })
+
 flushRepeatedLogs()
 lastLogSignature = null
 console.info(`[${timestamp()}] [dome-control-server] listening on http://${host}:${port}${path}`)
+console.info(`[${timestamp()}] [dome-control-server] registry listening on ws://${host}:${registryPort}${registryPath}`)

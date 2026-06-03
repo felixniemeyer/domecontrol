@@ -4,8 +4,12 @@ import { mat3, vec2, vec3 } from 'gl-matrix'
 import { DataConnection, Peer } from 'peerjs'
 import {
   DOME_CONTROL_PROTOCOL,
+  REGISTRY_PATH,
   camDirToDomemaster,
   domemasterToCamDir,
+  subscribeArtworkDirectory,
+  type ArtworkDescriptor,
+  type ArtworkDirectorySubscription,
   type ControllerAlignmentCross,
   type ControllerAlignmentPacket,
   type ControllerButtons,
@@ -56,10 +60,17 @@ const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
 
 const query = new URLSearchParams(window.location.search)
 const laptopMode = query.get('laptop') === '1'
-const sessionId = query.get('session') ?? 'fabric-artwork-local'
+// Session/artwork are now learned from the registry on selection, not fixed.
+let sessionId = query.get('session') ?? 'fabric-artwork-local'
 const controllerId = query.get('controller') ?? `controller-${Math.random().toString(36).slice(2, 8)}`
 const peerId = `controller-peer-${Math.random().toString(36).slice(2, 10)}`
-const artworkPeerId = query.get('artwork-peer') ?? 'artwork-runtime'
+// Escape hatch: force a specific artwork peer id (skips the chooser/registry).
+const forcedArtworkPeerId = query.get('artwork-peer')
+// Optional pre-selection by registered name (skips the chooser when it appears).
+const preferredArtworkName = query.get('artwork')
+const registryPort = Number(query.get('registry-port') ?? 8082)
+let selectedArtworkId: string | null = forcedArtworkPeerId
+let directorySubscription: ArtworkDirectorySubscription | null = null
 const peerHost = window.location.hostname || '127.0.0.1'
 const peerSecure = window.location.protocol === 'https:'
 const peerPort = peerSecure ? Number(window.location.port || 443) : 8081
@@ -143,6 +154,9 @@ const startCalibrationButton = document.getElementById('start-calibration') as H
 const backCalibrationButton = document.getElementById('back-calibration') as HTMLButtonElement
 const confirmAlignmentButton = document.getElementById('confirm-alignment') as HTMLButtonElement
 const recalibrateButton = document.getElementById('recalibrate') as HTMLButtonElement
+const gameScreen = document.getElementById('game-screen') as HTMLElement
+const gameScreenTitle = document.getElementById('game-screen-title') as HTMLHeadingElement
+const gameList = document.getElementById('game-list') as HTMLDivElement
 
 function preventLongPressBrowserAction(event: Event) {
   event.preventDefault()
@@ -220,6 +234,83 @@ function setActiveScreen(screen: 'intro' | 'calibration' | 'control') {
   introScreen.hidden = screen !== 'intro'
   calibrationScreen.hidden = screen !== 'calibration'
   controlScreen.hidden = screen !== 'control'
+}
+
+// --- artwork discovery ---------------------------------------------------
+
+function registryUrl() {
+  // https client reaches the registry same-origin (proxied); http connects direct.
+  return peerSecure
+    ? `wss://${window.location.host}${REGISTRY_PATH}`
+    : `ws://${peerHost}:${registryPort}${REGISTRY_PATH}`
+}
+
+function showGameChooser(artworks: ArtworkDescriptor[]) {
+  gameScreenTitle.textContent = 'Choose a game'
+  gameList.replaceChildren(
+    ...artworks.map((artwork) => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = artwork.name
+      button.addEventListener('click', () => selectArtwork(artwork))
+      return button
+    }),
+  )
+  gameScreen.hidden = false
+}
+
+function showWaitingForGame() {
+  gameScreenTitle.textContent = 'Waiting for an available game…'
+  gameList.replaceChildren()
+  gameScreen.hidden = false
+}
+
+function selectArtwork(artwork: ArtworkDescriptor) {
+  selectedArtworkId = artwork.id
+  sessionId = artwork.sessionId
+  logClient('artwork-selected', { name: artwork.name, id: artwork.id, sessionId })
+  gameScreen.hidden = true
+  forceLogNextInput = true
+  openArtworkConnection()
+}
+
+function handleDirectory(artworks: ArtworkDescriptor[]) {
+  // Forced peer id ignores the chooser entirely.
+  if (forcedArtworkPeerId) return
+
+  // If our chosen game vanished, drop the connection and re-choose.
+  if (selectedArtworkId && !artworks.some((artwork) => artwork.id === selectedArtworkId)) {
+    logClient('artwork-unregistered', { id: selectedArtworkId })
+    selectedArtworkId = null
+    controlConnection?.close()
+    controlConnection = null
+  }
+
+  if (selectedArtworkId) {
+    gameScreen.hidden = true
+    return
+  }
+
+  const preferred = preferredArtworkName
+    ? artworks.find((artwork) => artwork.name === preferredArtworkName)
+    : undefined
+  if (preferred) {
+    selectArtwork(preferred)
+  } else if (artworks.length === 0) {
+    showWaitingForGame()
+  } else if (artworks.length === 1) {
+    selectArtwork(artworks[0]!)
+  } else {
+    showGameChooser(artworks)
+  }
+}
+
+function subscribeDirectory() {
+  if (forcedArtworkPeerId || directorySubscription) return
+  directorySubscription = subscribeArtworkDirectory({
+    url: registryUrl(),
+    onUpdate: handleDirectory,
+  })
 }
 
 function setCalibrationUi() {
@@ -845,14 +936,15 @@ function attachConnection(connection: DataConnection) {
 }
 
 function openArtworkConnection() {
+  if (!selectedArtworkId) return
   if (!peer || !peer.open || peer.destroyed) return
   if (controlConnection?.open) return
 
   controlConnection?.close()
   logClient('connect-attempt', {
-    artworkPeerId,
+    artworkPeerId: selectedArtworkId,
   })
-  const connection = peer.connect(artworkPeerId, {
+  const connection = peer.connect(selectedArtworkId, {
     label: 'dome-control',
     metadata: { sessionId, controllerId, peerId },
     reliable: true,
@@ -903,7 +995,8 @@ function connectPeerServer() {
   peer.on('open', (id) => {
     setTransportStatus(`PeerJS ready ${id}`)
     logClient('peer-open', { id })
-    openArtworkConnection()
+    // Reconnect to an already-chosen game (or honour a forced peer id).
+    if (selectedArtworkId) openArtworkConnection()
   })
 
   peer.on('disconnected', () => {
@@ -958,12 +1051,14 @@ document.addEventListener('dragstart', preventLongPressBrowserAction)
 window.addEventListener('pagehide', () => {
   pageIsLeaving = true
   sendGoodbye()
+  directorySubscription?.dispose()
   destroyPeer()
 })
 
 window.addEventListener('beforeunload', () => {
   pageIsLeaving = true
   sendGoodbye()
+  directorySubscription?.dispose()
   destroyPeer()
 })
 
@@ -990,6 +1085,8 @@ syncCursorFromDirection()
 if (laptopMode) {
   setCalibrationUi()
 }
+if (!forcedArtworkPeerId) showWaitingForGame()
+subscribeDirectory()
 connectPeerServer()
 sendCurrentInput()
 
