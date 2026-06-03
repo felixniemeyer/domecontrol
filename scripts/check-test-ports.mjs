@@ -2,6 +2,7 @@ import net from 'node:net'
 
 const ports = [
   { name: 'dome server', port: 18081 },
+  { name: 'artwork registry', port: 18082 },
   { name: 'artwork stub', port: 14173 },
   { name: 'controller', port: 15176 },
 ]

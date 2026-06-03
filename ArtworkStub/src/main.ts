@@ -1,13 +1,17 @@
 import { DataConnection, Peer } from 'peerjs'
-import type {
-  ControllerAlignmentCross,
-  ControllerInputPacket,
-  ControllerInputState,
-  ControllerPlayerState,
-  ControllerSessionState,
-  ControllerTransport,
-  DomeControlPacket,
-} from '../../Runtime/src/index'
+import {
+  fetchServerConfig,
+  registerArtwork,
+  REGISTRY_PATH,
+  type ArtworkRegistration,
+  type ControllerAlignmentCross,
+  type ControllerInputPacket,
+  type ControllerInputState,
+  type ControllerPlayerState,
+  type ControllerSessionState,
+  type ControllerTransport,
+  type DomeControlPacket,
+} from '@dome-control/runtime'
 
 declare global {
   interface Window {
@@ -25,10 +29,12 @@ type StubPlayer = ControllerPlayerState
 
 const query = new URLSearchParams(window.location.search)
 const sessionId = query.get('session') ?? 'fabric-artwork-local'
-const artworkPeerId = query.get('artwork-peer') ?? 'artwork-runtime'
+const artworkName = query.get('name') ?? 'Artwork Stub'
+const artworkPeerId = query.get('artwork-peer') ?? `artwork-${Math.random().toString(36).slice(2, 10)}`
 const peerHost = window.location.hostname || '127.0.0.1'
 const peerSecure = window.location.protocol === 'https:'
 const peerPort = Number(import.meta.env.VITE_PEER_PORT ?? (peerSecure ? window.location.port || 443 : 8081))
+const registryPort = Number(import.meta.env.VITE_REGISTRY_PORT ?? 8082)
 const peerPath = '/peerjs'
 
 const statusElement = document.getElementById('status') as HTMLParagraphElement
@@ -42,6 +48,8 @@ let peer: Peer | null = null
 let transport: ControllerTransport = 'debug-local'
 let alignmentCross: ControllerAlignmentCross | null = null
 let peerReconnectTimer: number | null = null
+let registration: ArtworkRegistration | null = null
+let iceServers: RTCIceServer[] | null = null
 
 function nowSeconds() {
   return performance.now() * 0.001
@@ -182,18 +190,40 @@ function destroyPeer() {
   peer = null
 }
 
-function connectPeer() {
+function registryUrl() {
+  return peerSecure
+    ? `wss://${window.location.host}${REGISTRY_PATH}`
+    : `ws://${peerHost}:${registryPort}${REGISTRY_PATH}`
+}
+
+function ensureRegistered() {
+  if (registration) return
+  registration = registerArtwork({
+    url: registryUrl(),
+    id: artworkPeerId,
+    name: artworkName,
+    sessionId,
+  })
+}
+
+async function connectPeer() {
   destroyPeer()
+
+  if (iceServers === null) {
+    iceServers = (await fetchServerConfig(registryUrl())).iceServers
+  }
 
   const nextPeer = new Peer(artworkPeerId, {
     host: peerHost,
     port: peerPort,
     path: peerPath,
     secure: peerSecure,
+    config: { iceServers: iceServers ?? [] },
   })
   peer = nextPeer
 
   nextPeer.on('open', () => {
+    ensureRegistered()
     renderState()
   })
 
@@ -235,6 +265,7 @@ window.domeControlRuntime = {
 }
 
 window.addEventListener('beforeunload', () => {
+  registration?.dispose()
   destroyPeer()
 })
 

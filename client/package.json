@@ -1,6 +1,6 @@
 {
   "name": "@dome-control/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Phone/browser controller client for dome-control fulldome games (device-orientation cursor over PeerJS/WebRTC).",
   "license": "MIT",
   "author": "felix niemeyer",

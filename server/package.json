@@ -1,6 +1,6 @@
 {
   "name": "@dome-control/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PeerJS/WebRTC signalling server for dome-control fulldome controllers.",
   "license": "MIT",
   "author": "felix niemeyer",

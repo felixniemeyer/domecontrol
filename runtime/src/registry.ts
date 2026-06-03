@@ -33,12 +33,24 @@ export type DirectorySubscribeMessage = { kind: 'directory-subscribe' }
 /** server -> controller: the current set of registered artworks. */
 export type DirectoryMessage = { kind: 'directory'; artworks: ArtworkDescriptor[] }
 
+export type NetworkMode = 'lan' | 'wan'
+
+/** ICE configuration the server dictates: LAN omits STUN/TURN, WAN includes them. */
+export type ServerConfig = {
+  mode: NetworkMode
+  iceServers: RTCIceServer[]
+}
+
+/** server -> peer: sent immediately on every registry connection. */
+export type ServerConfigMessage = { kind: 'server-config' } & ServerConfig
+
 export type RegistryMessage =
   | ArtworkRegisterMessage
   | RegisterOkMessage
   | RegisterRejectedMessage
   | DirectorySubscribeMessage
   | DirectoryMessage
+  | ServerConfigMessage
 
 export function parseRegistryMessage(data: unknown): RegistryMessage | null {
   if (typeof data !== 'string') return null
@@ -121,6 +133,43 @@ export function registerArtwork(options: RegisterArtworkOptions): ArtworkRegistr
       socket = null
     },
   }
+}
+
+// --- shared: ICE config --------------------------------------------------
+
+// The server decides LAN vs WAN; peers fetch this before creating their
+// PeerJS peer so ICE gathering matches the deployment (LAN => no STUN/TURN).
+// Falls back to a LAN-safe empty config if the registry is unreachable.
+export function fetchServerConfig(url: string, timeoutMs = 2000): Promise<ServerConfig> {
+  const fallback: ServerConfig = { mode: 'lan', iceServers: [] }
+  return new Promise((resolve) => {
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(url)
+    } catch {
+      resolve(fallback)
+      return
+    }
+    let settled = false
+    const finish = (config: ServerConfig) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        socket.close()
+      } catch {
+        // ignore
+      }
+      resolve(config)
+    }
+    const timer = setTimeout(() => finish(fallback), timeoutMs)
+    socket.addEventListener('message', (event) => {
+      const message = parseRegistryMessage(event.data)
+      if (message?.kind === 'server-config') finish({ mode: message.mode, iceServers: message.iceServers })
+    })
+    socket.addEventListener('error', () => finish(fallback))
+    socket.addEventListener('close', () => finish(fallback))
+  })
 }
 
 // --- controller side -----------------------------------------------------

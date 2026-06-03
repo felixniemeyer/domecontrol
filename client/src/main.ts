@@ -7,6 +7,7 @@ import {
   REGISTRY_PATH,
   camDirToDomemaster,
   domemasterToCamDir,
+  fetchServerConfig,
   subscribeArtworkDirectory,
   type ArtworkDescriptor,
   type ArtworkDirectorySubscription,
@@ -71,6 +72,8 @@ const preferredArtworkName = query.get('artwork')
 const registryPort = Number(query.get('registry-port') ?? 8082)
 let selectedArtworkId: string | null = forcedArtworkPeerId
 let directorySubscription: ArtworkDirectorySubscription | null = null
+// ICE servers dictated by the server (LAN => []); fetched once, reused on reconnect.
+let iceServers: RTCIceServer[] | null = null
 const peerHost = window.location.hostname || '127.0.0.1'
 const peerSecure = window.location.protocol === 'https:'
 const peerPort = peerSecure ? Number(window.location.port || 443) : 8081
@@ -981,15 +984,20 @@ function destroyPeer() {
   peer = null
 }
 
-function connectPeerServer() {
+async function connectPeerServer() {
   destroyPeer()
   setTransportStatus(`Connecting via PeerJS ${peerHost}:${peerPort}`)
+
+  if (iceServers === null) {
+    iceServers = (await fetchServerConfig(registryUrl())).iceServers
+  }
 
   peer = new Peer(peerId, {
     host: peerHost,
     port: peerPort,
     path: peerPath,
     secure: peerSecure,
+    config: { iceServers: iceServers ?? [] },
   })
 
   peer.on('open', (id) => {

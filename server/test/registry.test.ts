@@ -65,7 +65,13 @@ class Client {
 }
 
 async function withRegistry(run: (url: string) => Promise<void>) {
-  const server: WebSocketServer = createArtworkRegistry({ host: '127.0.0.1', port: 0, path: '/registry' })
+  const server: WebSocketServer = createArtworkRegistry({
+    host: '127.0.0.1',
+    port: 0,
+    path: '/registry',
+    mode: 'lan',
+    iceServers: [],
+  })
   await new Promise<void>((resolve) => server.on('listening', resolve))
   const { port } = server.address() as AddressInfo
   try {
@@ -74,6 +80,16 @@ async function withRegistry(run: (url: string) => Promise<void>) {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
+
+test('announces server config on connect', async () => {
+  await withRegistry(async (url) => {
+    const client = await Client.open(url)
+    const config = await client.waitFor((m) => m.kind === 'server-config')
+    assert.equal(config.mode, 'lan')
+    assert.deepEqual(config.iceServers, [])
+    client.close()
+  })
+})
 
 test('accepts a registration and rejects a duplicate name', async () => {
   await withRegistry(async (url) => {

@@ -2,6 +2,7 @@ import net from 'node:net'
 
 const targets = [
   { name: 'dome server', host: '127.0.0.1', port: 18081 },
+  { name: 'artwork registry', host: '127.0.0.1', port: 18082 },
   { name: 'artwork stub', host: '127.0.0.1', port: 14173 },
   { name: 'controller', host: '127.0.0.1', port: 15176 },
 ]

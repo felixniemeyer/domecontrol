@@ -11,13 +11,16 @@ export type ArtworkRegistryOptions = {
   host: string
   port: number
   path: string
+  /** Announced to every peer on connect so they configure ICE accordingly. */
+  mode: 'lan' | 'wan'
+  iceServers: unknown[]
   log?: RegistryLogger
 }
 
 type RegisteredArtwork = { id: string; name: string; sessionId: string; socket: WebSocket }
 
 export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocketServer {
-  const { host, port, path } = options
+  const { host, port, path, mode, iceServers } = options
   const log: RegistryLogger = options.log ?? (() => {})
   const artworksByName = new Map<string, RegisteredArtwork>()
   const directorySubscribers = new Set<WebSocket>()
@@ -38,6 +41,9 @@ export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocke
 
   server.on('connection', (socket) => {
     let registeredName: string | null = null
+
+    // Tell every peer the ICE config up front (before it creates its peer).
+    send(socket, { kind: 'server-config', mode, iceServers })
 
     socket.on('message', (raw) => {
       let message: Record<string, unknown>

@@ -13,6 +13,15 @@ const registryPort = Number(process.env.REGISTRY_PORT ?? 8082)
 // Keep in sync with REGISTRY_PATH in @dome-control/runtime.
 const registryPath = process.env.REGISTRY_PATH ?? '/registry'
 
+// LAN (default) tells peers to skip STUN/TURN — host/mDNS candidates connect
+// directly on a local network and need no internet. WAN supplies STUN (or a
+// custom set via ICE_SERVERS as a JSON array) for NAT traversal.
+const networkMode: 'lan' | 'wan' = (process.env.NETWORK_MODE ?? 'lan').toLowerCase() === 'wan' ? 'wan' : 'lan'
+const wanIceServers: unknown[] = process.env.ICE_SERVERS
+  ? JSON.parse(process.env.ICE_SERVERS)
+  : [{ urls: 'stun:stun.l.google.com:19302' }]
+const iceServers: unknown[] = networkMode === 'wan' ? wanIceServers : []
+
 let lastLogSignature: string | null = null
 let repeatedLogCount = 0
 
@@ -89,9 +98,9 @@ peerServer.on('error', (error) => {
 })
 
 // Artwork registry (discovery only; controller input stays peer-to-peer).
-createArtworkRegistry({ host, port: registryPort, path: registryPath, log: logConnection })
+createArtworkRegistry({ host, port: registryPort, path: registryPath, mode: networkMode, iceServers, log: logConnection })
 
 flushRepeatedLogs()
 lastLogSignature = null
 console.info(`[${timestamp()}] [dome-control-server] listening on http://${host}:${port}${path}`)
-console.info(`[${timestamp()}] [dome-control-server] registry listening on ws://${host}:${registryPort}${registryPath}`)
+console.info(`[${timestamp()}] [dome-control-server] registry listening on ws://${host}:${registryPort}${registryPath} (mode: ${networkMode})`)
