@@ -60,7 +60,9 @@ const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
 ]
 
 const query = new URLSearchParams(window.location.search)
-const laptopMode = query.get('laptop') === '1'
+// For exhibits on local WiFi (http, no secure context for sensors):
+// default to joystick/"laptop" mode. Use ?laptop=0 to force the phone sensor flow.
+const laptopMode = query.get('laptop') !== '0'
 // Session/artwork are now learned from the registry on selection, not fixed.
 let sessionId = query.get('session') ?? 'fabric-artwork-local'
 const controllerId = query.get('controller') ?? `controller-${Math.random().toString(36).slice(2, 8)}`

@@ -1,8 +1,11 @@
 import { PeerServer } from 'peer'
 import { createArtworkRegistry } from './registry.ts'
+import os from 'node:os'
 
 const port = Number(process.env.PORT ?? 8081)
-const host = process.env.HOST ?? '127.0.0.1'
+// Default to 0.0.0.0 so phones on the same WiFi/LAN can reach the PeerJS broker and registry.
+// Override with HOST=127.0.0.1 for purely local dev if desired.
+const host = process.env.HOST ?? '0.0.0.0'
 const path = process.env.PEER_PATH ?? '/peerjs'
 const webrtcLogEnabled = process.env.WEBRTC_LOG === '1'
 
@@ -104,3 +107,22 @@ flushRepeatedLogs()
 lastLogSignature = null
 console.info(`[${timestamp()}] [dome-control-server] listening on http://${host}:${port}${path}`)
 console.info(`[${timestamp()}] [dome-control-server] registry listening on ws://${host}:${registryPort}${registryPath} (mode: ${networkMode})`)
+if (networkMode === 'lan') {
+  console.info(`[${timestamp()}] [dome-control-server] LAN mode: no ICE servers. Controllers and artworks must be on the same local network.`)
+}
+
+// Print reachable addresses (helps exhibit setup on local WiFi).
+const nets = os.networkInterfaces()
+const addrs: string[] = []
+for (const name of Object.keys(nets)) {
+  for (const net of nets[name] || []) {
+    if (net.family === 'IPv4' && !net.internal) {
+      addrs.push(`http://${net.address}:${port}${path}`)
+      addrs.push(`ws://${net.address}:${registryPort}${registryPath}`)
+    }
+  }
+}
+if (addrs.length > 0) {
+  console.info(`[${timestamp()}] [dome-control-server] reachable addresses (point QRs and clients here):`)
+  for (const a of addrs) console.info(' ', a)
+}

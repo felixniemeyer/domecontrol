@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // Zero-dependency static server for the built Vite app (dist/), with SPA
 // fallback. Port via `--port <n>` or PORT env, else the default below.
+//
+// For exhibits: prints LAN IP URLs so phones on the same WiFi can reach it easily.
+// Recommended controller URL: http://<ip>:<port>/?laptop=1&artwork-peer=xxx&session=yyy
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname, normalize } from 'node:path'
+import os from 'node:os'
 
 const DEFAULT_PORT = 4175
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
@@ -48,4 +52,20 @@ const server = createServer(async (req, res) => {
 const port = resolvePort()
 server.listen(port, () => {
   console.log(`[dome-control-client] serving ${root} on http://localhost:${port}`)
+
+  // Print LAN addresses for phones on the local WiFi / exhibit network.
+  const nets = os.networkInterfaces()
+  const addrs = []
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addrs.push(`http://${net.address}:${port}/?laptop=1`)
+      }
+    }
+  }
+  if (addrs.length) {
+    console.log('[dome-control-client] LAN URLs for phones (use one in the QR codes):')
+    for (const a of addrs) console.log('  ', a)
+  }
+  console.log('[dome-control-client] Tip for direct connect: add &artwork-peer=<id>&session=<id> to the URL')
 })
