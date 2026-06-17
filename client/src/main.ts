@@ -60,9 +60,11 @@ const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
 ]
 
 const query = new URLSearchParams(window.location.search)
-// For exhibits on local WiFi (http, no secure context for sensors):
-// default to joystick/"laptop" mode. Use ?laptop=0 to force the phone sensor flow.
-const laptopMode = query.get('laptop') !== '0'
+// Laptop / joystick mode is the default (no sensors needed).
+// Use ?osensor (or ?osensor=1) for explicit orientation sensor / phone tilt mode.
+// ?laptop=0 can still be used to force sensor mode.
+const forceOsensor = query.has('osensor') || query.get('osensor') === '1'
+const laptopMode = !forceOsensor && query.get('laptop') !== '0'
 // Session/artwork are now learned from the registry on selection, not fixed.
 let sessionId = query.get('session') ?? 'fabric-artwork-local'
 const controllerId = query.get('controller') ?? `controller-${Math.random().toString(36).slice(2, 8)}`
@@ -72,6 +74,7 @@ const forcedArtworkPeerId = query.get('artwork-peer')
 // Optional pre-selection by registered name (skips the chooser when it appears).
 const preferredArtworkName = query.get('artwork')
 const registryPort = Number(query.get('registry-port') ?? 8082)
+const exhibitPassword = query.get('password') || query.get('pw') || undefined
 let selectedArtworkId: string | null = forcedArtworkPeerId
 let directorySubscription: ArtworkDirectorySubscription | null = null
 // ICE servers dictated by the server (LAN => []); fetched once, reused on reconnect.
@@ -314,6 +317,7 @@ function subscribeDirectory() {
   if (forcedArtworkPeerId || directorySubscription) return
   directorySubscription = subscribeArtworkDirectory({
     url: registryUrl(),
+    credential: exhibitPassword,
     onUpdate: handleDirectory,
   })
 }
@@ -951,7 +955,7 @@ function openArtworkConnection() {
   })
   const connection = peer.connect(selectedArtworkId, {
     label: 'dome-control',
-    metadata: { sessionId, controllerId, peerId },
+    metadata: { sessionId, controllerId, peerId, ...(exhibitPassword ? { password: exhibitPassword } : {}) },
     reliable: true,
     serialization: 'json',
   })

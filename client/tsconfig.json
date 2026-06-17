@@ -14,7 +14,13 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* Map dome-control/runtime to source for type checking during build */
+    "paths": {
+      "@dome-control/runtime": ["../runtime/src/index.ts"],
+      "@dome-control/runtime/*": ["../runtime/src/*"]
+    }
   },
   "include": ["src"]
 }

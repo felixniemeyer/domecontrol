@@ -25,6 +25,15 @@ const wanIceServers: unknown[] = process.env.ICE_SERVERS
   : [{ urls: 'stun:stun.l.google.com:19302' }]
 const iceServers: unknown[] = networkMode === 'wan' ? wanIceServers : []
 
+// Optional shared password/credential for protected exhibition mode.
+// If not set (default), no password is required.
+// Controllers and artworks can send ?password=... but it will be ignored unless configured here.
+const rawCredential = process.env.EXHIBIT_PASSWORD || process.env.PASSWORD || process.env.CREDENTIAL || ''
+const exhibitCredential = rawCredential ? rawCredential : null
+if (exhibitCredential) {
+  console.info(`[${timestamp()}] [dome-control-server] credential protection enabled`)
+}
+
 let lastLogSignature: string | null = null
 let repeatedLogCount = 0
 
@@ -101,7 +110,7 @@ peerServer.on('error', (error) => {
 })
 
 // Artwork registry (discovery only; controller input stays peer-to-peer).
-createArtworkRegistry({ host, port: registryPort, path: registryPath, mode: networkMode, iceServers, log: logConnection })
+createArtworkRegistry({ host, port: registryPort, path: registryPath, mode: networkMode, iceServers, credential: exhibitCredential, log: logConnection })
 
 flushRepeatedLogs()
 lastLogSignature = null

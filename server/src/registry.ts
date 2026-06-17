@@ -14,13 +14,17 @@ export type ArtworkRegistryOptions = {
   /** Announced to every peer on connect so they configure ICE accordingly. */
   mode: 'lan' | 'wan'
   iceServers: unknown[]
+  /** If set, all artwork-register and directory-subscribe must provide a matching credential.
+   *  If null/undefined (default), access is open (no password required).
+   */
+  credential?: string | null
   log?: RegistryLogger
 }
 
 type RegisteredArtwork = { id: string; name: string; sessionId: string; socket: WebSocket }
 
 export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocketServer {
-  const { host, port, path, mode, iceServers } = options
+  const { host, port, path, mode, iceServers, credential } = options
   const log: RegistryLogger = options.log ?? (() => {})
   const artworksByName = new Map<string, RegisteredArtwork>()
   const directorySubscribers = new Set<WebSocket>()
@@ -35,6 +39,11 @@ export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocke
   const broadcastDirectory = () => {
     const message = { kind: 'directory', artworks: directorySnapshot() }
     for (const socket of directorySubscribers) send(socket, message)
+  }
+
+  function isCredentialValid(provided?: string): boolean {
+    if (!credential) return true
+    return provided === credential
   }
 
   const server = new WebSocketServer({ host, port, path })
@@ -55,8 +64,13 @@ export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocke
       if (!message || typeof message.kind !== 'string') return
 
       if (message.kind === 'artwork-register') {
-        const { id, name, sessionId } = message
+        const { id, name, sessionId, credential: providedCredential } = message
         if (typeof id !== 'string' || typeof name !== 'string' || typeof sessionId !== 'string') return
+        if (!isCredentialValid(providedCredential as string | undefined)) {
+          send(socket, { kind: 'register-rejected', reason: 'invalid-credential' })
+          log('artwork-rejected', { name, reason: 'invalid-credential' })
+          return
+        }
         const existing = artworksByName.get(name)
         if (existing && existing.socket !== socket) {
           send(socket, { kind: 'register-rejected', reason: 'name-taken' })
@@ -72,6 +86,13 @@ export function createArtworkRegistry(options: ArtworkRegistryOptions): WebSocke
       }
 
       if (message.kind === 'directory-subscribe') {
+        const { credential: providedCredential } = message
+        if (!isCredentialValid(providedCredential as string | undefined)) {
+          // Silently ignore or close; don't add to subscribers.
+          socket.close()
+          log('directory-subscribe-rejected', { reason: 'invalid-credential' })
+          return
+        }
         directorySubscribers.add(socket)
         send(socket, { kind: 'directory', artworks: directorySnapshot() })
       }

@@ -31,6 +31,7 @@ const query = new URLSearchParams(window.location.search)
 const sessionId = query.get('session') ?? 'fabric-artwork-local'
 const artworkName = query.get('name') ?? 'Artwork Stub'
 const artworkPeerId = query.get('artwork-peer') ?? `artwork-${Math.random().toString(36).slice(2, 10)}`
+const exhibitPassword = query.get('password') || query.get('pw') || undefined
 const peerHost = window.location.hostname || '127.0.0.1'
 const peerSecure = window.location.protocol === 'https:'
 const peerPort = Number(import.meta.env.VITE_PEER_PORT ?? (peerSecure ? window.location.port || 443 : 8081))
@@ -119,7 +120,12 @@ function adoptControllerPeer(controllerId: string, remotePeerId: string) {
 function attachConnection(connection: DataConnection) {
   const remotePeerId = connection.peer
   const metadataSessionId = connection.metadata?.sessionId
+  const metadataPassword = connection.metadata?.password || connection.metadata?.pw
   if (metadataSessionId && metadataSessionId !== sessionId) {
+    connection.close()
+    return
+  }
+  if (exhibitPassword && metadataPassword !== exhibitPassword) {
     connection.close()
     return
   }
@@ -203,6 +209,7 @@ function ensureRegistered() {
     id: artworkPeerId,
     name: artworkName,
     sessionId,
+    credential: exhibitPassword,
   })
 }
 

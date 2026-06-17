@@ -59,13 +59,17 @@ server.listen(port, () => {
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] || []) {
       if (net.family === 'IPv4' && !net.internal) {
-        addrs.push(`http://${net.address}:${port}/?laptop=1`)
+        addrs.push(`http://${net.address}:${port}/`)   // laptop mode is default; add ?osensor for orientation sensors
       }
     }
   }
+  const pw = process.env.EXHIBIT_PASSWORD || process.env.PASSWORD
+  const pwSuffix = pw ? `?password=${encodeURIComponent(pw)}` : ''
+
   if (addrs.length) {
     console.log('[dome-control-client] LAN URLs for phones (use one in the QR codes):')
-    for (const a of addrs) console.log('  ', a)
+    for (const a of addrs) console.log('  ', a + pwSuffix)
   }
-  console.log('[dome-control-client] Tip for direct connect: add &artwork-peer=<id>&session=<id> to the URL')
+  console.log('[dome-control-client] Laptop/joystick mode is default (no param needed). Use ?osensor for phone orientation sensors.')
+  console.log('[dome-control-client] Tip for direct connect: add &artwork-peer=<id>&session=<id> (and &password=... if protected)')
 })

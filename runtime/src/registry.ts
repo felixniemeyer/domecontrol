@@ -19,16 +19,16 @@ export type ArtworkDescriptor = {
 // --- wire messages -------------------------------------------------------
 
 /** artwork -> server: claim a name and advertise connection details. */
-export type ArtworkRegisterMessage = { kind: 'artwork-register' } & ArtworkDescriptor
+export type ArtworkRegisterMessage = { kind: 'artwork-register' } & ArtworkDescriptor & { credential?: string }
 
 /** server -> artwork: registration accepted. */
 export type RegisterOkMessage = { kind: 'register-ok' }
 
-/** server -> artwork: registration refused (currently only a duplicate name). */
-export type RegisterRejectedMessage = { kind: 'register-rejected'; reason: 'name-taken' }
+/** server -> artwork: registration refused. */
+export type RegisterRejectedMessage = { kind: 'register-rejected'; reason: 'name-taken' | 'invalid-credential' }
 
 /** controller -> server: ask for (and keep receiving) the live directory. */
-export type DirectorySubscribeMessage = { kind: 'directory-subscribe' }
+export type DirectorySubscribeMessage = { kind: 'directory-subscribe'; credential?: string }
 
 /** server -> controller: the current set of registered artworks. */
 export type DirectoryMessage = { kind: 'directory'; artworks: ArtworkDescriptor[] }
@@ -72,6 +72,8 @@ export type ArtworkRegistration = {
 export type RegisterArtworkOptions = ArtworkDescriptor & {
   /** ws(s):// URL of the registry endpoint (server origin + REGISTRY_PATH). */
   url: string
+  /** Shared secret for exhibit / protected broker. Passed as `?password=...` in client URLs. */
+  credential?: string
   /** Called when the name is refused. Defaults to a console error. */
   onRejected?: (reason: RegisterRejectedMessage['reason']) => void
   /** Called once the server confirms the registration. */
@@ -81,7 +83,7 @@ export type RegisterArtworkOptions = ArtworkDescriptor & {
 }
 
 export function registerArtwork(options: RegisterArtworkOptions): ArtworkRegistration {
-  const { url, id, name, sessionId } = options
+  const { url, id, name, sessionId, credential } = options
   const reconnectDelayMs = options.reconnectDelayMs ?? 1500
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -100,7 +102,7 @@ export function registerArtwork(options: RegisterArtworkOptions): ArtworkRegistr
     const ws = new WebSocket(url)
     socket = ws
     ws.addEventListener('open', () => {
-      const message: ArtworkRegisterMessage = { kind: 'artwork-register', id, name, sessionId }
+      const message: ArtworkRegisterMessage = { kind: 'artwork-register', id, name, sessionId, ...(credential ? { credential } : {}) }
       ws.send(JSON.stringify(message))
     })
     ws.addEventListener('message', (event) => {
@@ -183,6 +185,8 @@ export type SubscribeArtworkDirectoryOptions = {
   url: string
   /** Called with the full artwork list on every change (empty when offline). */
   onUpdate: (artworks: ArtworkDescriptor[]) => void
+  /** Shared secret for exhibit / protected broker. */
+  credential?: string
   /** Auto-reconnect delay in ms (<= 0 disables). Defaults to 1500. */
   reconnectDelayMs?: number
 }
@@ -190,7 +194,7 @@ export type SubscribeArtworkDirectoryOptions = {
 export function subscribeArtworkDirectory(
   options: SubscribeArtworkDirectoryOptions,
 ): ArtworkDirectorySubscription {
-  const { url, onUpdate } = options
+  const { url, onUpdate, credential } = options
   const reconnectDelayMs = options.reconnectDelayMs ?? 1500
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -209,7 +213,7 @@ export function subscribeArtworkDirectory(
     const ws = new WebSocket(url)
     socket = ws
     ws.addEventListener('open', () => {
-      const message: DirectorySubscribeMessage = { kind: 'directory-subscribe' }
+      const message: DirectorySubscribeMessage = { kind: 'directory-subscribe', ...(credential ? { credential } : {}) }
       ws.send(JSON.stringify(message))
     })
     ws.addEventListener('message', (event) => {
