@@ -79,9 +79,11 @@ let selectedArtworkId: string | null = forcedArtworkPeerId
 let directorySubscription: ArtworkDirectorySubscription | null = null
 // ICE servers dictated by the server (LAN => []); fetched once, reused on reconnect.
 let iceServers: RTCIceServer[] | null = null
-const peerHost = window.location.hostname || '127.0.0.1'
+const forcedPeerHost = query.get('peer-host') || query.get('broker-host') || undefined
+const peerHost = forcedPeerHost || window.location.hostname || '127.0.0.1'
 const peerSecure = window.location.protocol === 'https:'
-const peerPort = peerSecure ? Number(window.location.port || 443) : 8081
+const forcedPeerPort = query.get('peer-port') || query.get('broker-port') || undefined
+const peerPort = forcedPeerPort ? Number(forcedPeerPort) : (peerSecure ? Number(window.location.port || 443) : 8081)
 const peerPath = '/peerjs'
 
 const direction = vec3.fromValues(0, 0, 1)
