@@ -23,6 +23,15 @@ function resolvePort() {
   return Number.isFinite(env) ? env : DEFAULT_PORT
 }
 
+function resolveHost() {
+  const i = process.argv.indexOf('--host')
+  if (i >= 0 && process.argv[i + 1]) {
+    return process.argv[i + 1]
+  }
+  const env = process.env.HOST
+  return env || undefined
+}
+
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
@@ -50,25 +59,40 @@ const server = createServer(async (req, res) => {
 })
 
 const port = resolvePort()
-server.listen(port, () => {
-  console.log(`[dome-control-client] serving ${root} on http://localhost:${port}`)
-
-  // Print LAN addresses for phones on the local WiFi / exhibit network.
-  const nets = os.networkInterfaces()
-  const addrs = []
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal) {
-        addrs.push(`http://${net.address}:${port}/`)   // laptop mode is default; add ?osensor for orientation sensors
-      }
-    }
+const host = resolveHost()
+server.on('error', (err) => {
+  if (err.code === 'EACCES') {
+    console.error(`[dome-control-client] Permission denied (EACCES) binding to port ${port}.`);
+    console.error('  Run with sudo, or grant permanent permission with:');
+    console.error(`    sudo setcap 'cap_net_bind_service=+ep' $(which node)`);
+    console.error('  Or set a higher port with UI_PORT=8080 .');
+  } else {
+    console.error(err);
   }
+  process.exit(1);
+});
+server.listen(port, host, () => {
+  const portStr = (port == 80) ? '' : `:${port}`;
   const pw = process.env.EXHIBIT_PASSWORD || process.env.PASSWORD
   const pwSuffix = pw ? `?password=${encodeURIComponent(pw)}` : ''
 
-  if (addrs.length) {
-    console.log('[dome-control-client] LAN URLs for phones (use one in the QR codes):')
-    for (const a of addrs) console.log('  ', a + pwSuffix)
+  if (host && host !== '0.0.0.0') {
+    console.log(`[dome-control-client] serving ${root} on http://${host}${portStr}/`)
+  } else {
+    // Print LAN addresses for phones on the local WiFi / exhibit network.
+    const nets = os.networkInterfaces()
+    const addrs = []
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name] || []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          addrs.push(`http://${net.address}${portStr}/`)   // laptop mode is default; add ?osensor for orientation sensors
+        }
+      }
+    }
+    if (addrs.length) {
+      console.log('[dome-control-client] LAN URLs for phones (use one in the QR codes):')
+      for (const a of addrs) console.log('  ', a + pwSuffix)
+    }
   }
   console.log('[dome-control-client] Laptop/joystick mode is default (no param needed). Use ?osensor for phone orientation sensors.')
   console.log('[dome-control-client] Tip for direct connect: add &artwork-peer=<id>&session=<id> (and &password=... if protected)')
