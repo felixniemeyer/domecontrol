@@ -16,6 +16,7 @@
   "description": "Runtime types, packet definitions and domemaster math for the dome-control fulldome controller protocol.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "node --test",
     "prepublishOnly": "npm run build"
   },
   "files": [

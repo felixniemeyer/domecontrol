@@ -1,10 +1,11 @@
 import './style.css'
 
 import { mat3, vec2, vec3 } from 'gl-matrix'
-import { DataConnection, Peer } from 'peerjs'
+import { Peer } from 'peerjs'
 import {
   DOME_CONTROL_PROTOCOL,
   REGISTRY_PATH,
+  WebSocketClientTransport,
   camDirToDomemaster,
   domemasterToCamDir,
   fetchServerConfig,
@@ -17,6 +18,7 @@ import {
   type ControllerInputPacket,
   type ControllerInputState,
   type ControllerGoodbyePacket,
+  type DomeControlConnection,
 } from '@dome-control/runtime'
 
 type CalibrationPhase = 'front' | 'right' | 'done'
@@ -65,8 +67,13 @@ const query = new URLSearchParams(window.location.search)
 // ?laptop=0 can still be used to force sensor mode.
 const forceOsensor = query.has('osensor') || query.get('osensor') === '1'
 const laptopMode = !forceOsensor && query.get('laptop') !== '0'
-// Session/artwork are now learned from the registry on selection, not fixed.
-let sessionId = query.get('session') ?? 'fabric-artwork-local'
+// Transport: the WebSocket relay is the default (exhibit). ?transport=webrtc keeps
+// the legacy PeerJS path for dev.
+const useWebsocket = (query.get('transport') ?? 'ws') !== 'webrtc'
+const transportName = useWebsocket ? 'WS relay' : 'PeerJS'
+// WebRTC learns the session from the registry on selection; WS uses a fixed one
+// that must match the artwork host (default 'stardust').
+let sessionId = query.get('session') ?? (useWebsocket ? 'stardust' : 'fabric-artwork-local')
 const controllerId = query.get('controller') ?? `controller-${Math.random().toString(36).slice(2, 8)}`
 const peerId = `controller-peer-${Math.random().toString(36).slice(2, 10)}`
 // Escape hatch: force a specific artwork peer id (skips the chooser/registry).
@@ -85,6 +92,12 @@ const peerSecure = window.location.protocol === 'https:'
 const forcedPeerPort = query.get('peer-port') || query.get('broker-port') || undefined
 const peerPort = forcedPeerPort ? Number(forcedPeerPort) : (peerSecure ? Number(window.location.port || 443) : 8081)
 const peerPath = '/peerjs'
+// WebSocket relay endpoint (player input transport). Fixed IP is the user's
+// config; we derive the host from where the page is served unless overridden.
+const relayPort = Number(query.get('relay-port') ?? 8083)
+const relayUrl = query.get('relay') || `${peerSecure ? 'wss' : 'ws'}://${peerHost}:${relayPort}`
+const controllerColor = query.get('color') || '#8bd3ff'
+const wsTransport = useWebsocket ? new WebSocketClientTransport(relayUrl, sessionId) : null
 
 const direction = vec3.fromValues(0, 0, 1)
 const domemasterCursor = vec2.create()
@@ -116,7 +129,7 @@ let motionAttached = false
 let orientationSensor: AbsoluteOrientationSensorInstance | null = null
 let inputSequence = 0
 let peer: Peer | null = null
-let controlConnection: DataConnection | null = null
+let controlConnection: DomeControlConnection | null = null
 let cameraStream: MediaStream | null = null
 let transportLabel = 'Disconnected'
 let inputLabel = 'Pointer aiming active'
@@ -903,6 +916,10 @@ function schedulePeerReconnect(delayMs = 1500) {
   if (peerReconnectTimer != null) return
   peerReconnectTimer = window.setTimeout(() => {
     peerReconnectTimer = null
+    if (useWebsocket) {
+      openArtworkConnection()
+      return
+    }
     if (peer && peer.open && !peer.destroyed) {
       openArtworkConnection()
       return
@@ -911,15 +928,13 @@ function schedulePeerReconnect(delayMs = 1500) {
   }, delayMs)
 }
 
-function attachConnection(connection: DataConnection) {
+function attachConnection(connection: DomeControlConnection) {
   controlConnection = connection
 
   connection.on('open', () => {
     clearPeerReconnectTimer()
-    setTransportStatus(`Connected via PeerJS ${peerHost}:${peerPort}`)
-    logClient('connection-open', {
-      remotePeerId: connection.peer,
-    })
+    setTransportStatus(`Connected (${transportName})`)
+    logClient('connection-open', { artworkId: selectedArtworkId })
     forceLogNextInput = true
     sendAlignment(calibrationPhase === 'done' ? null : calibrationPhase, true)
     sendCurrentInput()
@@ -929,17 +944,14 @@ function attachConnection(connection: DataConnection) {
     if (controlConnection === connection) {
       controlConnection = null
     }
-    setTransportStatus('PeerJS connection closed')
-    logClient('connection-close', {
-      remotePeerId: connection.peer,
-    })
+    setTransportStatus(`${transportName} connection closed`)
+    logClient('connection-close', { artworkId: selectedArtworkId })
     schedulePeerReconnect()
   })
 
-  connection.on('error', (error) => {
-    setTransportStatus('PeerJS connection error')
+  connection.on('error', (error: unknown) => {
+    setTransportStatus(`${transportName} connection error`)
     logClient('connection-error', {
-      remotePeerId: connection.peer,
       error: error instanceof Error ? error.message : String(error),
     })
     schedulePeerReconnect()
@@ -948,8 +960,25 @@ function attachConnection(connection: DataConnection) {
 
 function openArtworkConnection() {
   if (!selectedArtworkId) return
-  if (!peer || !peer.open || peer.destroyed) return
   if (controlConnection?.open) return
+
+  // WebSocket relay: no peer server, just open a controller socket.
+  if (useWebsocket) {
+    controlConnection?.close()
+    logClient('connect-attempt', { artworkId: selectedArtworkId })
+    attachConnection(
+      wsTransport!.connect(selectedArtworkId, {
+        sessionId,
+        controllerId,
+        color: controllerColor,
+        credential: exhibitPassword,
+      }),
+    )
+    return
+  }
+
+  // --- legacy WebRTC path ---
+  if (!peer || !peer.open || peer.destroyed) return
 
   controlConnection?.close()
   logClient('connect-attempt', {
@@ -981,7 +1010,8 @@ function openArtworkConnection() {
     window.clearTimeout(timeoutId)
   })
 
-  attachConnection(connection)
+  // DataConnection structurally satisfies DomeControlConnection (open/send/close/on).
+  attachConnection(connection as unknown as DomeControlConnection)
 }
 
 function destroyPeer() {
@@ -1102,8 +1132,13 @@ if (laptopMode) {
   setCalibrationUi()
 }
 if (!forcedArtworkPeerId) showWaitingForGame()
-subscribeDirectory()
-connectPeerServer()
+if (useWebsocket) {
+  // Fixed endpoint: the directory yields exactly one artwork → auto-connect.
+  wsTransport!.openDirectory().onUpdate(handleDirectory)
+} else {
+  subscribeDirectory()
+  connectPeerServer()
+}
 sendCurrentInput()
 
 let lastHeartbeatTick = Date.now()
