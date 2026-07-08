@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import basicSsl from '@vitejs/plugin-basic-ssl'
+import fs from 'node:fs'
 import { defineConfig } from 'vite'
 
 const require = createRequire(import.meta.url)
@@ -9,7 +9,6 @@ const peerTargetPort = process.env.PEER_PROXY_PORT ?? '8081'
 const registryTargetPort = process.env.REGISTRY_PROXY_PORT ?? '8082'
 
 export default defineConfig({
-  plugins: [basicSsl()],
   resolve: {
     alias: {
       // Dev against runtime source so registry changes are picked up live.
@@ -20,7 +19,10 @@ export default defineConfig({
     },
   },
   server: {
-    https: true,
+    https: {
+      key: fs.readFileSync(path.resolve(__dirname, '../../certs/dome.key')),
+      cert: fs.readFileSync(path.resolve(__dirname, '../../certs/dome.crt')),
+    },
     proxy: {
       '/peerjs': {
         target: `http://${peerTargetHost}:${peerTargetPort}`,
@@ -31,6 +33,12 @@ export default defineConfig({
         target: `ws://${peerTargetHost}:${registryTargetPort}`,
         changeOrigin: true,
         ws: true,
+      },
+      '/ws-relay': {
+        target: `ws://127.0.0.1:8083`,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/ws-relay/, ''),
       },
     },
   },

@@ -16,6 +16,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
+import { readFileSync } from 'node:fs'
 
 const port = Number.parseInt(process.env.WS_RELAY_PORT ?? '', 10) || 8083
 const host = process.env.HOST ?? '0.0.0.0'
@@ -70,8 +72,19 @@ function query(req: IncomingMessage) {
   return new URL(req.url ?? '/', 'http://localhost').searchParams
 }
 
-const wss = new WebSocketServer({ host, port })
-log(`🚀 relay listening on ws://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))
+const certFile = process.env.CERT_FILE
+const keyFile = process.env.KEY_FILE
+let wss: WebSocketServer
+
+if (certFile && keyFile) {
+  const httpsServer = createHttpsServer({ cert: readFileSync(certFile), key: readFileSync(keyFile) })
+  httpsServer.listen(port, host)
+  wss = new WebSocketServer({ server: httpsServer })
+  log(`🔒 secure relay listening on wss://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))
+} else {
+  wss = new WebSocketServer({ host, port })
+  log(`🚀 relay listening on ws://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))
+}
 
 wss.on('connection', (ws, req) => {
   const params = query(req)

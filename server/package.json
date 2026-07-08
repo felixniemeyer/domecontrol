@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "dev": "node --loader ts-node/esm src/server.ts",
+    "dev:relay": "node --loader ts-node/esm src/ws-relay.ts",
     "start": "node --loader ts-node/esm src/server.ts",
     "test": "node --loader ts-node/esm --test test/registry.test.ts",
     "build": "esbuild src/server.ts --bundle --platform=node --format=cjs --target=node18 --packages=external --outfile=dist/server.cjs --banner:js=\"#!/usr/bin/env node\" && esbuild src/ws-relay.ts --bundle --platform=node --format=cjs --target=node18 --packages=external --outfile=dist/ws-relay.cjs --banner:js=\"#!/usr/bin/env node\"",
