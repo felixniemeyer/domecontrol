@@ -6,7 +6,7 @@ export type ControllerButtons = {
   accelerate: boolean
 }
 
-export type ControllerAlignmentCross = 'front' | 'right'
+export type ControllerAlignmentCross = 'top' | 'right' | 'back'
 
 export type ControllerVector3 = [number, number, number]
 

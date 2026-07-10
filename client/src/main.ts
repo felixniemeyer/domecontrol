@@ -21,7 +21,8 @@ import {
   type DomeControlConnection,
 } from '@dome-control/runtime'
 
-type CalibrationPhase = 'front' | 'right' | 'done'
+type CalibrationDirection = ControllerAlignmentCross
+type CalibrationPhase = 'center' | CalibrationDirection | 'done'
 
 type CalibrationSample = {
   forward: vec3
@@ -62,11 +63,12 @@ const buttonSpecs: Array<{ key: keyof ControllerButtons; label: string }> = [
 ]
 
 const query = new URLSearchParams(window.location.search)
-// Laptop / joystick mode is the default (no sensors needed).
-// Use ?osensor (or ?osensor=1) for explicit orientation sensor / phone tilt mode.
-// ?laptop=0 can still be used to force sensor mode.
-const forceOsensor = query.has('osensor') || query.get('osensor') === '1'
-const laptopMode = !forceOsensor && query.get('laptop') !== '0'
+// Orientation sensor / phone tilt mode is the default.
+// Use ?laptop (or ?laptop=1) for explicit laptop / joystick mode.
+// ?osensor=0 can still be used to force laptop mode.
+const laptopParam = query.get('laptop')
+const forceLaptop = laptopParam === '' || laptopParam === '1'
+const laptopMode = forceLaptop || query.get('osensor') === '0'
 // Transport: the WebSocket relay is the default (exhibit). ?transport=webrtc keeps
 // the legacy PeerJS path for dev.
 const useWebsocket = (query.get('transport') ?? 'ws') !== 'webrtc'
@@ -110,19 +112,27 @@ const localDeviceRight = vec3.fromValues(1, 0, 0)
 const rawForward = vec3.create()
 const rawRight = vec3.create()
 const calibratedForward = vec3.create()
-const basisFront = vec3.create()
-const basisRight = vec3.create()
-const basisUp = vec3.create()
-const scratchVec = vec3.create()
-const scratchVecB = vec3.create()
 const scratchOrientation = mat3.create()
+const deviceSampleMatrix = mat3.create()
+const inverseDeviceSampleMatrix = mat3.create()
+const calibrationCoefficients = vec3.create()
 
-const calibrationSamples: Record<'front' | 'right', CalibrationSample | null> = {
-  front: null,
-  right: null,
+const elevatedCrossAngleRadians = 20 * Math.PI / 180
+const elevatedCrossHorizontal = Math.cos(elevatedCrossAngleRadians)
+const elevatedCrossForward = Math.sin(elevatedCrossAngleRadians)
+const calibrationTargetDirections: Record<CalibrationDirection, vec3> = {
+  top: vec3.fromValues(0, 0, 1),
+  right: vec3.fromValues(elevatedCrossHorizontal, 0, elevatedCrossForward),
+  back: vec3.fromValues(0, -elevatedCrossHorizontal, elevatedCrossForward),
 }
 
-let calibrationPhase: CalibrationPhase = 'front'
+const calibrationSamples: Record<CalibrationDirection, CalibrationSample | null> = {
+  top: null,
+  right: null,
+  back: null,
+}
+
+let calibrationPhase: CalibrationPhase = 'center'
 let calibrationActive = false
 let hasSensorSample = false
 let motionAttached = false
@@ -160,6 +170,7 @@ const calibrationScreen = document.getElementById('calibration-screen') as HTMLE
 const controlScreen = document.getElementById('control-screen') as HTMLElement
 const calibrationPreview = document.getElementById('calibration-preview') as HTMLDivElement
 const calibrationHeading = document.getElementById('calibration-heading') as HTMLParagraphElement
+const calibrationCopy = document.getElementById('calibration-copy') as HTMLParagraphElement
 const calibrationCrossShape = document.querySelector<SVGPathElement>('#calibration-cross-shape')!
 const aimPad = document.getElementById('aim-pad') as HTMLDivElement
 const aimCursor = document.getElementById('aim-cursor') as HTMLDivElement
@@ -361,10 +372,22 @@ function setCalibrationUi() {
   confirmAlignmentButton.hidden = calibrationPhase === 'done'
   backCalibrationButton.hidden = calibrationPhase === 'done'
 
-  if (calibrationPhase === 'front') {
-    sendAlignment('front')
-    calibrationScreen.dataset.phase = 'front'
-    calibrationHeading.textContent = 'front'
+  if (calibrationPhase === 'center') {
+    sendAlignment(null)
+    calibrationScreen.dataset.phase = 'center'
+    calibrationHeading.textContent = 'go close to the center of the dome for calibration'
+    calibrationCopy.textContent = ''
+    confirmAlignmentButton.textContent = "I'm near the center"
+    confirmAlignmentButton.disabled = false
+    backCalibrationButton.textContent = 'Back'
+    return
+  }
+
+  if (calibrationPhase === 'top') {
+    sendAlignment('top')
+    calibrationScreen.dataset.phase = 'top'
+    calibrationHeading.textContent = 'top'
+    calibrationCopy.textContent = 'Point the cross to the equal color cross on the dome and confirm'
     confirmAlignmentButton.textContent = 'Confirm'
     confirmAlignmentButton.disabled = !hasSensorSample
     backCalibrationButton.textContent = 'Back'
@@ -375,6 +398,18 @@ function setCalibrationUi() {
     sendAlignment('right')
     calibrationScreen.dataset.phase = 'right'
     calibrationHeading.textContent = 'right'
+    calibrationCopy.textContent = 'Point the cross to the equal color cross on the dome and confirm'
+    confirmAlignmentButton.textContent = 'Confirm'
+    confirmAlignmentButton.disabled = !hasSensorSample
+    backCalibrationButton.textContent = 'Back'
+    return
+  }
+
+  if (calibrationPhase === 'back') {
+    sendAlignment('back')
+    calibrationScreen.dataset.phase = 'back'
+    calibrationHeading.textContent = 'back'
+    calibrationCopy.textContent = 'Point the cross to the equal color cross on the dome and confirm'
     confirmAlignmentButton.textContent = 'Confirm'
     confirmAlignmentButton.disabled = !hasSensorSample
     backCalibrationButton.textContent = 'Back'
@@ -492,6 +527,12 @@ function sendAlignment(cross: ControllerAlignmentCross | null, force = false) {
   }
 }
 
+function currentAlignmentCross(): ControllerAlignmentCross | null {
+  return calibrationPhase === 'top' || calibrationPhase === 'right' || calibrationPhase === 'back'
+    ? calibrationPhase
+    : null
+}
+
 function syncCursorFromDirection() {
   camDirToDomemaster(domemasterCursor, direction)
   aimCursor.style.left = `${(domemasterCursor[0] + 1) * 50}%`
@@ -535,12 +576,11 @@ function currentScreenAngleRadians() {
 }
 
 function projectVectorIntoCalibration(out: vec3, vector: vec3) {
-  vec3.set(
-    out,
-    vec3.dot(vector, basisRight),
-    vec3.dot(vector, basisUp),
-    vec3.dot(vector, basisFront),
-  )
+  vec3.transformMat3(calibrationCoefficients, vector, inverseDeviceSampleMatrix)
+  vec3.zero(out)
+  vec3.scaleAndAdd(out, out, calibrationTargetDirections.top, calibrationCoefficients[0])
+  vec3.scaleAndAdd(out, out, calibrationTargetDirections.right, calibrationCoefficients[1])
+  vec3.scaleAndAdd(out, out, calibrationTargetDirections.back, calibrationCoefficients[2])
   if (vec3.squaredLength(out) < 1e-8) {
     vec3.set(out, 0, 0, 1)
   } else {
@@ -549,31 +589,22 @@ function projectVectorIntoCalibration(out: vec3, vector: vec3) {
 }
 
 function tryBuildCalibrationBasis() {
-  const frontSample = calibrationSamples.front
+  const topSample = calibrationSamples.top
   const rightSample = calibrationSamples.right
-  if (!frontSample || !rightSample) return false
+  const backSample = calibrationSamples.back
+  if (!topSample || !rightSample || !backSample) return false
 
-  vec3.copy(basisFront, frontSample.forward)
-  vec3.scale(scratchVec, basisFront, vec3.dot(rightSample.forward, basisFront))
-  vec3.sub(scratchVecB, rightSample.forward, scratchVec)
+  deviceSampleMatrix[0] = topSample.forward[0]
+  deviceSampleMatrix[1] = topSample.forward[1]
+  deviceSampleMatrix[2] = topSample.forward[2]
+  deviceSampleMatrix[3] = rightSample.forward[0]
+  deviceSampleMatrix[4] = rightSample.forward[1]
+  deviceSampleMatrix[5] = rightSample.forward[2]
+  deviceSampleMatrix[6] = backSample.forward[0]
+  deviceSampleMatrix[7] = backSample.forward[1]
+  deviceSampleMatrix[8] = backSample.forward[2]
 
-  if (vec3.squaredLength(scratchVecB) < 1e-8) {
-    vec3.scale(scratchVec, basisFront, vec3.dot(frontSample.right, basisFront))
-    vec3.sub(scratchVecB, frontSample.right, scratchVec)
-  }
-  if (vec3.squaredLength(scratchVecB) < 1e-8) {
-    return false
-  }
-
-  vec3.normalize(basisRight, scratchVecB)
-  vec3.cross(basisUp, basisFront, basisRight)
-  if (vec3.squaredLength(basisUp) < 1e-8) {
-    return false
-  }
-  vec3.normalize(basisUp, basisUp)
-  vec3.cross(basisRight, basisUp, basisFront)
-  vec3.normalize(basisRight, basisRight)
-  return true
+  return Boolean(mat3.invert(inverseDeviceSampleMatrix, deviceSampleMatrix))
 }
 
 function captureCurrentSample(): CalibrationSample | null {
@@ -588,12 +619,12 @@ function resetCalibration() {
   if (laptopMode) {
     return
   }
-  calibrationSamples.front = null
+  calibrationSamples.top = null
   calibrationSamples.right = null
-  vec3.zero(basisFront)
-  vec3.zero(basisRight)
-  vec3.zero(basisUp)
-  calibrationPhase = 'front'
+  calibrationSamples.back = null
+  mat3.identity(deviceSampleMatrix)
+  mat3.identity(inverseDeviceSampleMatrix)
+  calibrationPhase = 'center'
   calibrationActive = true
   setInputStatus('Awaiting phone calibration')
   setCalibrationUi()
@@ -603,11 +634,18 @@ function confirmCalibrationStep() {
   if (laptopMode) {
     return
   }
+
+  if (calibrationPhase === 'center') {
+    calibrationPhase = 'top'
+    setCalibrationUi()
+    return
+  }
+
   const sample = captureCurrentSample()
   if (!sample) return
 
-  if (calibrationPhase === 'front') {
-    calibrationSamples.front = sample
+  if (calibrationPhase === 'top') {
+    calibrationSamples.top = sample
     calibrationPhase = 'right'
     setCalibrationUi()
     return
@@ -615,6 +653,13 @@ function confirmCalibrationStep() {
 
   if (calibrationPhase === 'right') {
     calibrationSamples.right = sample
+    calibrationPhase = 'back'
+    setCalibrationUi()
+    return
+  }
+
+  if (calibrationPhase === 'back') {
+    calibrationSamples.back = sample
     if (!tryBuildCalibrationBasis()) return
     projectVectorIntoCalibration(calibratedForward, rawForward)
     applyControllerDirection(calibratedForward, 'Motion aiming active')
@@ -717,13 +762,20 @@ async function enableMotion() {
         referenceFrame: 'device',
       })
       orientationSensor.addEventListener('reading', onAbsoluteOrientationReading)
-      orientationSensor.addEventListener('error', () => {
+      orientationSensor.addEventListener('error', (event) => {
+        logClient('orientation-sensor-error', {
+          error: 'error' in event && event.error instanceof Error ? event.error.message : 'unknown',
+        })
         setUnsupportedOrientationUi()
       })
       orientationSensor.start()
       motionAttached = true
-    } catch {
+      logClient('orientation-sensor-started')
+    } catch (error) {
       orientationSensor = null
+      logClient('orientation-sensor-start-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
       setUnsupportedOrientationUi()
       return false
     }
@@ -745,12 +797,24 @@ async function enableCamera() {
       audio: false,
     })
     calibrationCamera.srcObject = cameraStream
-  } catch {}
+    logClient('camera-started')
+  } catch (error) {
+    logClient('camera-unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 }
 
 async function startCalibration() {
   if (laptopMode) return
-  await enterImmersiveMobileMode()
+  logClient('calibration-start-clicked')
+  calibrationActive = true
+  calibrationPhase = 'center'
+  setActiveScreen('calibration')
+  setInputStatus('Phone calibration active')
+  setCalibrationUi()
+
+  void enterImmersiveMobileMode()
   if (!isAbsoluteOrientationSupported()) {
     setUnsupportedOrientationUi()
     return
@@ -759,18 +823,14 @@ async function startCalibration() {
   try {
     const motionEnabled = await enableMotion()
     if (!motionEnabled) return
-    await enableCamera()
-    calibrationActive = true
-    setActiveScreen('calibration')
-    setInputStatus('Phone calibration active')
-    setCalibrationUi()
+    void enableCamera()
   } finally {
     startCalibrationButton.disabled = false
   }
 }
 
 function stepBackCalibration() {
-  if (calibrationPhase === 'front') {
+  if (calibrationPhase === 'center') {
     calibrationActive = false
     hasSensorSample = false
     sendAlignment(null)
@@ -779,9 +839,21 @@ function stepBackCalibration() {
     setActiveScreen('intro')
     return
   }
+  if (calibrationPhase === 'top') {
+    calibrationPhase = 'center'
+    sendAlignment(null)
+    setCalibrationUi()
+    return
+  }
   if (calibrationPhase === 'right') {
-    calibrationSamples.front = null
-    calibrationPhase = 'front'
+    calibrationSamples.top = null
+    calibrationPhase = 'top'
+    setCalibrationUi()
+    return
+  }
+  if (calibrationPhase === 'back') {
+    calibrationSamples.right = null
+    calibrationPhase = 'right'
     setCalibrationUi()
     return
   }
@@ -936,7 +1008,7 @@ function attachConnection(connection: DomeControlConnection) {
     setTransportStatus(`Connected (${transportName})`)
     logClient('connection-open', { artworkId: selectedArtworkId })
     forceLogNextInput = true
-    sendAlignment(calibrationPhase === 'done' ? null : calibrationPhase, true)
+    sendAlignment(currentAlignmentCross(), true)
     sendCurrentInput()
   })
 

@@ -127,12 +127,23 @@ h2 + p {
   gap: 1rem;
 }
 
-.screen--calibration[data-phase="front"] {
+.screen--calibration[data-phase="top"] {
   background: linear-gradient(180deg, #321432 0%, #140914 100%);
 }
 
 .screen--calibration[data-phase="right"] {
   background: linear-gradient(180deg, #14284e 0%, #09121d 100%);
+}
+
+.screen--calibration[data-phase="back"] {
+  background: linear-gradient(180deg, #18351f 0%, #08110b 100%);
+}
+
+.screen--calibration[data-phase="center"] {
+  --cross-color: #ffd76a;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 215, 106, 0.18), transparent 36%),
+    linear-gradient(180deg, #141922 0%, #090b10 100%);
 }
 
 .screen__frame {
@@ -202,6 +213,21 @@ h2 + p {
   align-content: center;
 }
 
+.screen--calibration[data-phase="center"] .calibration-card {
+  top: 50%;
+  height: auto;
+  min-height: 42.5vw;
+  transform: translate(-50%, -50%);
+}
+
+.screen--calibration[data-phase="center"] .calibration-preview__cross {
+  display: none;
+}
+
+.screen--calibration[data-phase="center"] .calibration-copy {
+  display: none;
+}
+
 .calibration-heading {
   margin: 0;
   font-size: clamp(1.5rem, 7vw, 2.4rem);
@@ -233,12 +259,16 @@ h2 + p {
   vector-effect: non-scaling-stroke;
 }
 
-.screen--calibration[data-phase="front"] {
+.screen--calibration[data-phase="top"] {
   --cross-color: #f0f;
 }
 
 .screen--calibration[data-phase="right"] {
   --cross-color: #0ff;
+}
+
+.screen--calibration[data-phase="back"] {
+  --cross-color: #75ff7d;
 }
 
 .screen__actions {
