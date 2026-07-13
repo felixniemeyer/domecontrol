@@ -44,6 +44,12 @@ type AbsoluteOrientationSensorConstructor = new (
   options?: AbsoluteOrientationSensorOptions,
 ) => AbsoluteOrientationSensorInstance
 
+type DeviceOrientationPermissionState = 'granted' | 'denied' | 'prompt'
+
+type DeviceOrientationEventConstructorWithPermission = typeof DeviceOrientationEvent & {
+  requestPermission?: (absolute?: boolean) => Promise<DeviceOrientationPermissionState>
+}
+
 type OrientationLockRequest =
   | 'any'
   | 'natural'
@@ -137,6 +143,7 @@ let calibrationActive = false
 let hasSensorSample = false
 let motionAttached = false
 let orientationSensor: AbsoluteOrientationSensorInstance | null = null
+let legacyMotionAttached = false
 let inputSequence = 0
 let peer: Peer | null = null
 let controlConnection: DomeControlConnection | null = null
@@ -259,9 +266,9 @@ function setInputStatus(label: string) {
 function setUnsupportedOrientationUi() {
   calibrationActive = false
   setActiveScreen('intro')
-  introTitle.textContent = "Your browser or phone does not support absolute orientation measuring. We're sorry."
+  introTitle.textContent = "Your browser or phone does not support orientation measuring. We're sorry."
   startCalibrationButton.hidden = true
-  setInputStatus('Absolute orientation unavailable')
+  setInputStatus('Orientation unavailable')
 }
 
 function setActiveScreen(screen: 'intro' | 'calibration' | 'control') {
@@ -681,6 +688,20 @@ function isAbsoluteOrientationSupported() {
   return typeof getAbsoluteOrientationSensorConstructor() === 'function'
 }
 
+function getDeviceOrientationEventConstructor() {
+  return (window as Window & {
+    DeviceOrientationEvent?: DeviceOrientationEventConstructorWithPermission
+  }).DeviceOrientationEvent
+}
+
+function isLegacyDeviceOrientationSupported() {
+  return typeof getDeviceOrientationEventConstructor() === 'function' && 'ondeviceorientation' in window
+}
+
+function isMotionOrientationSupported() {
+  return isAbsoluteOrientationSupported() || isLegacyDeviceOrientationSupported()
+}
+
 function isMobileViewport() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches
 }
@@ -729,6 +750,48 @@ function onAbsoluteOrientationReading() {
   mat3.rotate(scratchOrientation, scratchOrientation, -currentScreenAngleRadians())
   vec3.transformMat3(rawForward, localDeviceForward, scratchOrientation)
   vec3.transformMat3(rawRight, localDeviceRight, scratchOrientation)
+  handleMotionSample()
+}
+
+function setDeviceOrientationMatrix(out: mat3, alpha: number, beta: number, gamma: number) {
+  const x = beta * Math.PI / 180
+  const y = alpha * Math.PI / 180
+  const z = -gamma * Math.PI / 180
+  const a = Math.cos(x)
+  const b = Math.sin(x)
+  const c = Math.cos(y)
+  const d = Math.sin(y)
+  const e = Math.cos(z)
+  const f = Math.sin(z)
+
+  // DeviceOrientation uses Tait-Bryan angles. This matches the browser
+  // convention used by Three.js DeviceOrientationControls: Euler YXZ, then
+  // rotate from camera-looking-out to phone-screen-looking-out coordinates.
+  out[0] = c * e + d * b * f
+  out[1] = a * f
+  out[2] = c * b * f - d * e
+  out[3] = d * b * e - c * f
+  out[4] = a * e
+  out[5] = d * f + c * b * e
+  out[6] = a * d
+  out[7] = -b
+  out[8] = a * c
+  mat3.rotate(out, out, -Math.PI / 2)
+}
+
+function onLegacyDeviceOrientation(event: DeviceOrientationEvent) {
+  if (event.alpha == null || event.beta == null || event.gamma == null) {
+    return
+  }
+
+  setDeviceOrientationMatrix(scratchOrientation, event.alpha, event.beta, event.gamma)
+  mat3.rotate(scratchOrientation, scratchOrientation, -currentScreenAngleRadians())
+  vec3.transformMat3(rawForward, localDeviceForward, scratchOrientation)
+  vec3.transformMat3(rawRight, localDeviceRight, scratchOrientation)
+  handleMotionSample()
+}
+
+function handleMotionSample() {
   vec3.normalize(rawForward, rawForward)
   vec3.normalize(rawRight, rawRight)
   hasSensorSample = true
@@ -750,12 +813,8 @@ async function enableMotion() {
     return true
   }
   const AbsoluteOrientationSensorCtor = getAbsoluteOrientationSensorConstructor()
-  if (!AbsoluteOrientationSensorCtor) {
-    setUnsupportedOrientationUi()
-    return false
-  }
 
-  if (!motionAttached) {
+  if (AbsoluteOrientationSensorCtor && !motionAttached) {
     try {
       orientationSensor = new AbsoluteOrientationSensorCtor({
         frequency: 60,
@@ -774,6 +833,36 @@ async function enableMotion() {
     } catch (error) {
       orientationSensor = null
       logClient('orientation-sensor-start-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      setUnsupportedOrientationUi()
+      return false
+    }
+  }
+
+  if (!motionAttached && !legacyMotionAttached) {
+    const DeviceOrientationEventCtor = getDeviceOrientationEventConstructor()
+    if (!DeviceOrientationEventCtor) {
+      setUnsupportedOrientationUi()
+      return false
+    }
+
+    try {
+      const requestPermission = DeviceOrientationEventCtor.requestPermission
+      if (typeof requestPermission === 'function') {
+        const permission = await requestPermission(true)
+        if (permission !== 'granted') {
+          logClient('legacy-orientation-permission-denied', { permission })
+          setUnsupportedOrientationUi()
+          return false
+        }
+      }
+
+      window.addEventListener('deviceorientation', onLegacyDeviceOrientation)
+      legacyMotionAttached = true
+      logClient('legacy-orientation-started')
+    } catch (error) {
+      logClient('legacy-orientation-start-failed', {
         error: error instanceof Error ? error.message : String(error),
       })
       setUnsupportedOrientationUi()
@@ -815,7 +904,7 @@ async function startCalibration() {
   setCalibrationUi()
 
   void enterImmersiveMobileMode()
-  if (!isAbsoluteOrientationSupported()) {
+  if (!isMotionOrientationSupported()) {
     setUnsupportedOrientationUi()
     return
   }
@@ -1193,7 +1282,9 @@ if (laptopMode) {
   setInputStatus('Laptop joystick active')
 } else {
   setActiveScreen('intro')
-  if (isAbsoluteOrientationSupported()) {
+  if (isMotionOrientationSupported()) {
+    startCalibrationButton.hidden = false
+    introTitle.textContent = 'Calibrate your phone to the dome'
     setInputStatus('Awaiting phone calibration')
   } else {
     setUnsupportedOrientationUi()
