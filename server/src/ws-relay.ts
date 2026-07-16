@@ -15,7 +15,7 @@
 // WebRTC path. Nothing here touches it.
 
 import { WebSocketServer, WebSocket } from 'ws'
-import type { IncomingMessage } from 'node:http'
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 
@@ -72,15 +72,38 @@ function query(req: IncomingMessage) {
   return new URL(req.url ?? '/', 'http://localhost').searchParams
 }
 
+function handleHealthCheck(req: IncomingMessage, res: ServerResponse) {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  if (url.pathname !== '/' && url.pathname !== '/health' && url.pathname !== '/healthz') {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('not found\n')
+    return
+  }
+
+  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+  res.end([
+    'dome-control ws relay ok',
+    `sessions: ${sessions.size}`,
+    'websocket path: /?role=controller|host&session=...',
+    '',
+  ].join('\n'))
+}
+
 const certFile = process.env.CERT_FILE
 const keyFile = process.env.KEY_FILE
+const healthEnabled = process.env.RELAY_HEALTH === '1'
 let wss: WebSocketServer
 
 if (certFile && keyFile) {
-  const httpsServer = createHttpsServer({ cert: readFileSync(certFile), key: readFileSync(keyFile) })
+  const httpsServer = createHttpsServer({ cert: readFileSync(certFile), key: readFileSync(keyFile) }, handleHealthCheck)
   httpsServer.listen(port, host)
   wss = new WebSocketServer({ server: httpsServer })
   log(`🔒 secure relay listening on wss://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))
+} else if (healthEnabled) {
+  const httpServer = createHttpServer(handleHealthCheck)
+  httpServer.listen(port, host)
+  wss = new WebSocketServer({ server: httpServer })
+  log(`🚀 relay listening on ws://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))
 } else {
   wss = new WebSocketServer({ host, port })
   log(`🚀 relay listening on ws://${host}:${port}` + (hostCredential ? '  (host auth required)' : ''))

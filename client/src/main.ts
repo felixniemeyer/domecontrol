@@ -103,7 +103,7 @@ const peerPath = '/peerjs'
 // WebSocket relay endpoint (player input transport). Fixed IP is the user's
 // config; we derive the host from where the page is served unless overridden.
 const relayPort = Number(query.get('relay-port') ?? 8083)
-const relayUrl = query.get('relay') || `${peerSecure ? 'wss' : 'ws'}://${peerHost}:${relayPort}`
+const relayUrl = query.get('relay') || (peerSecure ? `wss://${window.location.host}/ws-relay` : `ws://${peerHost}:${relayPort}`)
 const controllerColor = query.get('color') || '#8bd3ff'
 const wsTransport = useWebsocket ? new WebSocketClientTransport(relayUrl, sessionId) : null
 
@@ -755,8 +755,8 @@ function onAbsoluteOrientationReading() {
 
 function setDeviceOrientationMatrix(out: mat3, alpha: number, beta: number, gamma: number) {
   const x = beta * Math.PI / 180
-  const y = alpha * Math.PI / 180
-  const z = -gamma * Math.PI / 180
+  const y = gamma * Math.PI / 180
+  const z = alpha * Math.PI / 180
   const a = Math.cos(x)
   const b = Math.sin(x)
   const c = Math.cos(y)
@@ -764,19 +764,18 @@ function setDeviceOrientationMatrix(out: mat3, alpha: number, beta: number, gamm
   const e = Math.cos(z)
   const f = Math.sin(z)
 
-  // DeviceOrientation uses Tait-Bryan angles. This matches the browser
-  // convention used by Three.js DeviceOrientationControls: Euler YXZ, then
-  // rotate from camera-looking-out to phone-screen-looking-out coordinates.
-  out[0] = c * e + d * b * f
-  out[1] = a * f
-  out[2] = c * b * f - d * e
-  out[3] = d * b * e - c * f
-  out[4] = a * e
-  out[5] = d * f + c * b * e
-  out[6] = a * d
-  out[7] = -b
+  // DeviceOrientationEvent is defined as intrinsic Z-X'-Y'' rotations:
+  // alpha around Z, beta around the rotated X axis, gamma around the rotated
+  // Y axis. Store the spec's row-major matrix in gl-matrix column-major order.
+  out[0] = e * c - f * b * d
+  out[1] = c * f + e * b * d
+  out[2] = -a * d
+  out[3] = -a * f
+  out[4] = e * a
+  out[5] = b
+  out[6] = c * f * b + e * d
+  out[7] = f * d - e * c * b
   out[8] = a * c
-  mat3.rotate(out, out, -Math.PI / 2)
 }
 
 function onLegacyDeviceOrientation(event: DeviceOrientationEvent) {

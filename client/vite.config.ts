@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url)
 const peerTargetHost = process.env.PEER_PROXY_HOST ?? '127.0.0.1'
 const peerTargetPort = process.env.PEER_PROXY_PORT ?? '8081'
 const registryTargetPort = process.env.REGISTRY_PROXY_PORT ?? '8082'
+const relayTarget = process.env.WS_RELAY_PROXY_TARGET ?? 'wss://127.0.0.1:8083'
 
 export default defineConfig({
   resolve: {
@@ -35,8 +36,9 @@ export default defineConfig({
         ws: true,
       },
       '/ws-relay': {
-        target: `ws://127.0.0.1:8083`,
+        target: relayTarget,
         changeOrigin: true,
+        secure: false,
         ws: true,
         rewrite: (path) => path.replace(/^\/ws-relay/, ''),
       },
