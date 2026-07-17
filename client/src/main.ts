@@ -154,6 +154,7 @@ let inputSequence = 0
 let peer: Peer | null = null
 let controlConnection: DomeControlConnection | null = null
 let cameraStream: MediaStream | null = null
+let cameraStopInProgress = false
 let transportLabel = 'Disconnected'
 let inputLabel = 'Pointer aiming active'
 let lastSentAlignmentCross: ControllerAlignmentCross | null | undefined
@@ -174,6 +175,10 @@ function logClient(event: string, data?: Record<string, unknown>) {
     sessionId,
     ...data,
   })
+}
+
+function logClientLine(message: string) {
+  console.info(`[${new Date().toISOString()}] [dome-control/client] ${message}`)
 }
 
 function formatDirectionLog(values: ArrayLike<number>) {
@@ -808,6 +813,10 @@ function isMotionOrientationSupported() {
   return fakeOrientation || isAbsoluteOrientationSupported() || isLegacyDeviceOrientationSupported()
 }
 
+function shouldEnterImmersiveMobileMode() {
+  return fakeOrientation || isAbsoluteOrientationSupported()
+}
+
 function isMobileViewport() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches
 }
@@ -993,31 +1002,87 @@ async function enableCamera() {
     return
   }
   if (cameraStream) return
+  logClientLine('camera: start request')
 
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
+  const constraints: MediaStreamConstraints[] = [
+    {
       video: {
         facingMode: { ideal: 'environment' },
       },
       audio: false,
-    })
-    calibrationCamera.srcObject = cameraStream
-    logClient('camera-started')
-  } catch (error) {
-    logClient('camera-unavailable', {
-      error: error instanceof Error ? error.message : String(error),
-    })
+    },
+    {
+      video: true,
+      audio: false,
+    },
+  ]
+
+  let lastError: unknown = null
+  for (const [index, constraint] of constraints.entries()) {
+    const label = index === 0 ? 'environment' : 'any'
+    try {
+      cameraStopInProgress = false
+      logClientLine(`camera: getUserMedia ${label}`)
+      cameraStream = await navigator.mediaDevices.getUserMedia(constraint)
+      const [track] = cameraStream.getVideoTracks()
+      logClientLine(`camera: stream granted ${label}; tracks=${cameraStream.getVideoTracks().length}; trackState=${track?.readyState ?? 'none'}`)
+      calibrationCamera.muted = true
+      calibrationCamera.playsInline = true
+      calibrationCamera.srcObject = cameraStream
+      logCameraVideoEvents()
+      try {
+        const playPromise = calibrationCamera.play()
+        playPromise.then(() => {
+          logClientLine(`camera: video play ok; paused=${calibrationCamera.paused}; readyState=${calibrationCamera.readyState}; size=${calibrationCamera.videoWidth}x${calibrationCamera.videoHeight}`)
+        }).catch((error) => {
+          if (cameraStopInProgress || !cameraStream) {
+            logClientLine(`camera: video play aborted after stop; ${error instanceof Error ? error.name + ': ' + error.message : String(error)}`)
+            return
+          }
+          logClientLine(`camera: video play failed; ${error instanceof Error ? error.name + ': ' + error.message : String(error)}`)
+        })
+      } catch (error) {
+        if (cameraStopInProgress || !cameraStream) {
+          logClientLine(`camera: video play aborted after stop; ${error instanceof Error ? error.name + ': ' + error.message : String(error)}`)
+          return
+        }
+        logClientLine(`camera: video play failed; ${error instanceof Error ? error.name + ': ' + error.message : String(error)}`)
+      }
+      window.setTimeout(() => {
+        logClientLine(`camera: after 1200ms; paused=${calibrationCamera.paused}; readyState=${calibrationCamera.readyState}; size=${calibrationCamera.videoWidth}x${calibrationCamera.videoHeight}`)
+      }, 1200)
+      logClientLine(`camera: started ${label}`)
+      return
+    } catch (error) {
+      lastError = error
+      logClientLine(`camera: getUserMedia ${label} failed; ${error instanceof Error ? error.name + ': ' + error.message : String(error)}`)
+    }
+  }
+
+  logClientLine(`camera: unavailable; ${lastError instanceof Error ? lastError.name + ': ' + lastError.message : String(lastError)}`)
+}
+
+function logCameraVideoEvents() {
+  const events: Array<keyof HTMLMediaElementEventMap> = ['loadedmetadata', 'canplay', 'playing', 'error']
+  for (const eventName of events) {
+    calibrationCamera.addEventListener(eventName, () => {
+      const error = calibrationCamera.error
+      const errorText = error ? `; error=${error.code}:${error.message}` : ''
+      logClientLine(`camera: video event ${eventName}; paused=${calibrationCamera.paused}; readyState=${calibrationCamera.readyState}; size=${calibrationCamera.videoWidth}x${calibrationCamera.videoHeight}${errorText}`)
+    }, { once: true })
   }
 }
 
 function stopCamera() {
   if (!cameraStream) return
+  cameraStopInProgress = true
+  logClientLine(`camera: stop; tracks=${cameraStream.getVideoTracks().length}`)
   for (const track of cameraStream.getTracks()) {
     track.stop()
   }
   cameraStream = null
   calibrationCamera.srcObject = null
-  logClient('camera-stopped')
+  logClientLine('camera: stopped')
 }
 
 async function startCalibration() {
@@ -1031,7 +1096,11 @@ async function startCalibration() {
   setInputStatus('Phone calibration active')
   setCalibrationUi()
 
-  void enterImmersiveMobileMode()
+  if (shouldEnterImmersiveMobileMode()) {
+    void enterImmersiveMobileMode()
+  } else {
+    logClientLine('fullscreen: skipped for legacy orientation path')
+  }
   if (!isMotionOrientationSupported()) {
     setUnsupportedOrientationUi()
     return
