@@ -2,6 +2,7 @@ import './style.css'
 
 import { mat3, vec2, vec3 } from 'gl-matrix'
 import { Peer } from 'peerjs'
+import qrcode from 'qrcode-generator'
 import {
   DOME_CONTROL_PROTOCOL,
   REGISTRY_PATH,
@@ -23,6 +24,7 @@ import {
 
 type CalibrationDirection = ControllerAlignmentCross
 type CalibrationPhase = 'center' | CalibrationDirection | 'done'
+type ShareQrMode = 'wifi' | 'app'
 
 type CalibrationSample = {
   forward: vec3
@@ -75,6 +77,7 @@ const query = new URLSearchParams(window.location.search)
 const laptopParam = query.get('laptop')
 const forceLaptop = laptopParam === '' || laptopParam === '1'
 const laptopMode = forceLaptop || query.get('osensor') === '0'
+const fakeOrientation = query.has('fake-orientation')
 // Transport: the WebSocket relay is the default (exhibit). ?transport=webrtc keeps
 // the legacy PeerJS path for dev.
 const useWebsocket = (query.get('transport') ?? 'ws') !== 'webrtc'
@@ -160,6 +163,9 @@ const inputSendIntervalMs = 1000 / 60
 let forceLogNextInput = true
 let lastLoggedInputSequence = 0
 let lastLoggedAccelerate = buttons.accelerate
+let controlBackToRecalibrateArmed = false
+let qrShareBackToControlArmed = false
+let calibrationHistoryDepth = 0
 
 function logClient(event: string, data?: Record<string, unknown>) {
   console.info(`[${new Date().toISOString()}] [dome-control/client] ${event}`, {
@@ -197,10 +203,36 @@ const calibrationCamera = document.getElementById('calibration-camera') as HTMLV
 const startCalibrationButton = document.getElementById('start-calibration') as HTMLButtonElement
 const backCalibrationButton = document.getElementById('back-calibration') as HTMLButtonElement
 const confirmAlignmentButton = document.getElementById('confirm-alignment') as HTMLButtonElement
+const controlShareActions = document.getElementById('control-share-actions') as HTMLDivElement
 const recalibrateButton = document.getElementById('recalibrate') as HTMLButtonElement
+const shareQrCodeButton = document.getElementById('share-qr-code') as HTMLButtonElement
 const gameScreen = document.getElementById('game-screen') as HTMLElement
 const gameScreenTitle = document.getElementById('game-screen-title') as HTMLHeadingElement
 const gameList = document.getElementById('game-list') as HTMLDivElement
+const qrShareScreen = document.getElementById('qr-share-screen') as HTMLElement
+const qrShareTitle = document.getElementById('qr-share-title') as HTMLHeadingElement
+const qrShareCode = document.getElementById('qr-share-code') as HTMLDivElement
+const qrShareCopy = document.getElementById('qr-share-copy') as HTMLParagraphElement
+const qrShareWifiButton = document.getElementById('qr-share-wifi') as HTMLButtonElement
+const qrShareAppButton = document.getElementById('qr-share-app') as HTMLButtonElement
+const qrShareBackButton = document.getElementById('qr-share-back') as HTMLButtonElement
+
+const qrShareModes: Record<ShareQrMode, {
+  title: string
+  copy: string
+  payload: string
+}> = {
+  wifi: {
+    title: 'Connect to WLAN',
+    copy: 'STARDUST · enter the fabric',
+    payload: wifiPayload('STARDUST', 'enter the fabric'),
+  },
+  app: {
+    title: 'Open the app',
+    copy: 'https://exhibition.aimparency.org/',
+    payload: 'https://exhibition.aimparency.org/',
+  },
+}
 
 function preventLongPressBrowserAction(event: Event) {
   event.preventDefault()
@@ -215,12 +247,11 @@ function pathFromPoints(points: Vec2[]) {
     .join(' ')} Z`
 }
 
-function buildAxisArrowPath(
+function buildAxisBarPath(
   center: Vec2,
   axis: Vec2,
   radius: number,
   halfWidth: number,
-  notchDepth: number,
 ) {
   const [cx, cy] = center
   const [ax, ay] = axis
@@ -235,22 +266,19 @@ function buildAxisArrowPath(
 
   return pathFromPoints([
     point(-tailAlong, -halfWidth),
-    point(radius - notchDepth, -halfWidth),
-    point(radius, 0),
-    point(radius - notchDepth, halfWidth),
+    point(tailAlong, -halfWidth),
+    point(tailAlong, halfWidth),
     point(-tailAlong, halfWidth),
-    point(-tailAlong + notchDepth, 0),
   ])
 }
 
 function buildCalibrationCrossPath() {
   const center: Vec2 = [50, 50]
   const radius = 43
-  const halfWidth = 5.5
-  const notchDepth = 11
+  const halfWidth = 5.5 * 0.8
   return [
-    buildAxisArrowPath(center, [1, 0], radius, halfWidth, notchDepth),
-    buildAxisArrowPath(center, [0, -1], radius, halfWidth, notchDepth),
+    buildAxisBarPath(center, [1, 0], radius, halfWidth),
+    buildAxisBarPath(center, [0, -1], radius, halfWidth),
   ].join(' ')
 }
 
@@ -274,10 +302,67 @@ function setUnsupportedOrientationUi() {
   setInputStatus('Orientation unavailable')
 }
 
-function setActiveScreen(screen: 'intro' | 'calibration' | 'control') {
+function setActiveScreen(screen: 'intro' | 'calibration' | 'control' | 'qr-share') {
   introScreen.hidden = screen !== 'intro'
   calibrationScreen.hidden = screen !== 'calibration'
   controlScreen.hidden = screen !== 'control'
+  qrShareScreen.hidden = screen !== 'qr-share'
+}
+
+function pushClientHistoryState(state: Record<string, string>): boolean {
+  try {
+    window.history.pushState(state, '', window.location.href)
+    return true
+  } catch (error) {
+    logClient('history-push-failed', { error: error instanceof Error ? error.message : String(error) })
+    return false
+  }
+}
+
+function armControlBackToRecalibrate() {
+  if (controlBackToRecalibrateArmed) return
+  controlBackToRecalibrateArmed = pushClientHistoryState({ domeControlScreen: 'control' })
+}
+
+function armQrBackToControl() {
+  if (qrShareBackToControlArmed) return
+  qrShareBackToControlArmed = pushClientHistoryState({ domeControlScreen: 'qr-share' })
+}
+
+function pushCalibrationHistoryState() {
+  if (pushClientHistoryState({ domeControlScreen: 'calibration', phase: calibrationPhase })) {
+    calibrationHistoryDepth += 1
+  }
+}
+
+function escapeWifi(value: string): string {
+  return value.replace(/([\\;,:"])/g, '\\$1')
+}
+
+function wifiPayload(ssid: string, password: string): string {
+  const s = escapeWifi(ssid)
+  return `WIFI:T:WPA;S:${s};P:${escapeWifi(password)};;`
+}
+
+function renderQr(target: HTMLElement, text: string): void {
+  const qr = qrcode(0, 'M')
+  qr.addData(text)
+  qr.make()
+  target.innerHTML = qr.createSvgTag({ scalable: true, margin: 1 })
+}
+
+function showShareQr(mode: ShareQrMode, pushHistory = false) {
+  const config = qrShareModes[mode]
+  if (pushHistory) {
+    armQrBackToControl()
+  }
+  qrShareScreen.dataset.mode = mode
+  qrShareTitle.textContent = config.title
+  qrShareCopy.textContent = config.copy
+  qrShareWifiButton.classList.toggle('is-active', mode === 'wifi')
+  qrShareAppButton.classList.toggle('is-active', mode === 'app')
+  renderQr(qrShareCode, config.payload)
+  setActiveScreen('qr-share')
 }
 
 // --- artwork discovery ---------------------------------------------------
@@ -364,7 +449,7 @@ function setCalibrationUi() {
     setActiveScreen('control')
     controlScreen.dataset.mode = 'laptop'
     laptopJoystickPanel.hidden = false
-    recalibrateButton.hidden = true
+    controlShareActions.hidden = true
     controlEyebrow.textContent = 'dome-control'
     controlTitle.textContent = 'Laptop controls'
     controlCopy.textContent = 'Laptop mode: drag the joystick to aim and hold accelerate.'
@@ -372,9 +457,16 @@ function setCalibrationUi() {
   }
 
   setActiveScreen(calibrationPhase === 'done' ? 'control' : 'calibration')
+  if (calibrationPhase === 'done') {
+    stopCamera()
+    calibrationHistoryDepth = 0
+    armControlBackToRecalibrate()
+  } else {
+    controlBackToRecalibrateArmed = false
+  }
   controlScreen.dataset.mode = 'phone'
   laptopJoystickPanel.hidden = true
-  recalibrateButton.hidden = calibrationPhase !== 'done'
+  controlShareActions.hidden = calibrationPhase !== 'done'
   controlEyebrow.textContent = 'dome-control'
   controlTitle.textContent = 'Phone controls'
   controlCopy.textContent = 'Point your phone into the direction you want to go and accelerate.'
@@ -385,8 +477,8 @@ function setCalibrationUi() {
   if (calibrationPhase === 'center') {
     sendAlignment(null)
     calibrationScreen.dataset.phase = 'center'
-    calibrationHeading.textContent = 'go close to the center of the dome for calibration'
-    calibrationCopy.textContent = ''
+    calibrationHeading.textContent = 'center'
+    calibrationCopy.textContent = 'go close to the center of the dome'
     confirmAlignmentButton.textContent = "I'm near the center"
     confirmAlignmentButton.disabled = false
     backCalibrationButton.textContent = 'Back'
@@ -618,6 +710,13 @@ function tryBuildCalibrationBasis() {
 }
 
 function captureCurrentSample(): CalibrationSample | null {
+  if (fakeOrientation && (
+    calibrationPhase === 'top'
+    || calibrationPhase === 'right'
+    || calibrationPhase === 'back'
+  )) {
+    setFakeOrientationSample(calibrationPhase)
+  }
   if (!hasSensorSample) return null
   return {
     forward: vec3.clone(rawForward),
@@ -647,7 +746,9 @@ function confirmCalibrationStep() {
 
   if (calibrationPhase === 'center') {
     calibrationPhase = 'top'
+    pushCalibrationHistoryState()
     setCalibrationUi()
+    void enableCamera()
     return
   }
 
@@ -657,6 +758,7 @@ function confirmCalibrationStep() {
   if (calibrationPhase === 'top') {
     calibrationSamples.top = sample
     calibrationPhase = 'right'
+    pushCalibrationHistoryState()
     setCalibrationUi()
     return
   }
@@ -664,6 +766,7 @@ function confirmCalibrationStep() {
   if (calibrationPhase === 'right') {
     calibrationSamples.right = sample
     calibrationPhase = 'back'
+    pushCalibrationHistoryState()
     setCalibrationUi()
     return
   }
@@ -702,7 +805,7 @@ function isLegacyDeviceOrientationSupported() {
 }
 
 function isMotionOrientationSupported() {
-  return isAbsoluteOrientationSupported() || isLegacyDeviceOrientationSupported()
+  return fakeOrientation || isAbsoluteOrientationSupported() || isLegacyDeviceOrientationSupported()
 }
 
 function isMobileViewport() {
@@ -810,7 +913,18 @@ function handleMotionSample() {
   }
 }
 
+function setFakeOrientationSample(directionKey: CalibrationDirection = 'top') {
+  vec3.copy(rawForward, calibrationTargetDirections[directionKey])
+  vec3.copy(rawRight, localDeviceRight)
+  hasSensorSample = true
+}
+
 async function enableMotion() {
+  if (fakeOrientation) {
+    setFakeOrientationSample()
+    setInputStatus('Fake orientation active')
+    return true
+  }
   if (laptopMode) {
     return true
   }
@@ -896,11 +1010,23 @@ async function enableCamera() {
   }
 }
 
+function stopCamera() {
+  if (!cameraStream) return
+  for (const track of cameraStream.getTracks()) {
+    track.stop()
+  }
+  cameraStream = null
+  calibrationCamera.srcObject = null
+  logClient('camera-stopped')
+}
+
 async function startCalibration() {
   if (laptopMode) return
   logClient('calibration-start-clicked')
   calibrationActive = true
   calibrationPhase = 'center'
+  calibrationHistoryDepth = 0
+  pushCalibrationHistoryState()
   setActiveScreen('calibration')
   setInputStatus('Phone calibration active')
   setCalibrationUi()
@@ -914,7 +1040,6 @@ async function startCalibration() {
   try {
     const motionEnabled = await enableMotion()
     if (!motionEnabled) return
-    void enableCamera()
   } finally {
     startCalibrationButton.disabled = false
   }
@@ -927,6 +1052,7 @@ function stepBackCalibration() {
     sendAlignment(null)
     calibrationPreview.hidden = true
     confirmAlignmentButton.disabled = true
+    stopCamera()
     setActiveScreen('intro')
     return
   }
@@ -1242,6 +1368,10 @@ startCalibrationButton.addEventListener('click', () => {
 })
 
 backCalibrationButton.addEventListener('click', () => {
+  if (calibrationHistoryDepth > 0) {
+    window.history.back()
+    return
+  }
   stepBackCalibration()
 })
 
@@ -1251,6 +1381,45 @@ confirmAlignmentButton.addEventListener('click', () => {
 
 recalibrateButton.addEventListener('click', () => {
   resetCalibration()
+})
+
+shareQrCodeButton.addEventListener('click', async () => {
+  showShareQr('wifi', true)
+})
+
+qrShareWifiButton.addEventListener('click', () => {
+  showShareQr('wifi')
+})
+
+qrShareAppButton.addEventListener('click', () => {
+  showShareQr('app')
+})
+
+qrShareBackButton.addEventListener('click', () => {
+  if (qrShareBackToControlArmed) {
+    window.history.back()
+    return
+  }
+  setCalibrationUi()
+})
+
+window.addEventListener('popstate', () => {
+  if (!qrShareScreen.hidden) {
+    qrShareBackToControlArmed = false
+    setCalibrationUi()
+    return
+  }
+
+  if (!calibrationScreen.hidden && calibrationPhase !== 'done') {
+    calibrationHistoryDepth = Math.max(0, calibrationHistoryDepth - 1)
+    stepBackCalibration()
+    return
+  }
+
+  if (!laptopMode && !controlScreen.hidden && calibrationPhase === 'done' && controlBackToRecalibrateArmed) {
+    controlBackToRecalibrateArmed = false
+    resetCalibration()
+  }
 })
 
 document.addEventListener('contextmenu', preventLongPressBrowserAction)
@@ -1285,8 +1454,11 @@ if (laptopMode) {
 } else {
   setActiveScreen('intro')
   if (isMotionOrientationSupported()) {
+    if (fakeOrientation) {
+      setFakeOrientationSample()
+    }
     startCalibrationButton.hidden = false
-    introTitle.textContent = 'Calibrate your phone to the dome'
+    introTitle.textContent = 'Control the dome!'
     setInputStatus('Awaiting phone calibration')
   } else {
     setUnsupportedOrientationUi()

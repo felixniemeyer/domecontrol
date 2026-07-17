@@ -26,7 +26,8 @@
   },
   "dependencies": {
     "gl-matrix": "^3.4.3",
-    "peerjs": "^1.5.5"
+    "peerjs": "^1.5.5",
+    "qrcode-generator": "^2.0.4"
   },
   "publishConfig": {
     "access": "public"

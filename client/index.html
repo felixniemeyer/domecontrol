@@ -18,8 +18,8 @@
       <section id="intro-screen" class="screen screen--intro">
         <div class="intro-shell">
           <p class="screen-eyebrow">dome-control</p>
-          <h1>Calibrate your phone to the dome</h1>
-          <button id="start-calibration" type="button">Start</button>
+          <h1>Control the dome!</h1>
+          <button id="start-calibration" type="button">Calibrate to start</button>
         </div>
       </section>
 
@@ -32,9 +32,11 @@
                 <p id="calibration-heading" class="calibration-heading">front</p>
                 <p id="calibration-copy" class="calibration-copy">Point the cross to the equal color cross on the dome and confirm</p>
               </div>
-              <svg class="calibration-preview__cross" viewBox="0 0 100 100" aria-hidden="true">
-                <path id="calibration-cross-shape" class="calibration-cross-shape" />
-              </svg>
+              <div class="calibration-cross-box">
+                <svg class="calibration-preview__cross" viewBox="0 0 100 100" aria-hidden="true">
+                  <path id="calibration-cross-shape" class="calibration-cross-shape" />
+                </svg>
+              </div>
             </div>
           </div>
 
@@ -56,7 +58,13 @@
               <p id="control-copy">Point your phone into the direction you want to go and accelerate.</p>
             </div>
           </header>
-          <button id="recalibrate" class="recalibrate-button" type="button">Recalibrate</button>
+          <div id="control-share-actions" class="control-share-actions">
+            <button id="recalibrate" class="control-share-actions__button" type="button">Recalibrate</button>
+            <button id="share-qr-code" class="control-share-actions__button control-share-actions__button--stacked" type="button">
+              <span>Invite pilot</span>
+              <span>Share QR code</span>
+            </button>
+          </div>
 
           <section id="laptop-joystick-panel" class="joystick-panel" hidden>
             <div class="joystick-panel__header">
@@ -70,9 +78,6 @@
           </section>
 
           <section class="button-panel">
-            <div class="button-panel__header">
-              <h2>Controls</h2>
-            </div>
             <div id="button-grid" class="button-grid"></div>
           </section>
         </div>
@@ -81,6 +86,26 @@
         <pre id="last-packet" hidden></pre>
         <p id="transport-status" hidden>Connecting…</p>
         <p id="input-status" hidden>Waiting for control</p>
+      </section>
+
+      <section id="qr-share-screen" class="screen screen--qr-share" hidden>
+        <div class="screen__frame">
+          <div class="qr-share-layout">
+            <div class="qr-share-stage">
+              <h1 id="qr-share-title">Connect to WLAN</h1>
+              <div id="qr-share-code" class="qr-share-code" aria-label="QR code"></div>
+              <p id="qr-share-copy" class="qr-share-copy"></p>
+            </div>
+
+            <div class="qr-share-controls">
+              <div class="qr-share-actions">
+                <button id="qr-share-wifi" type="button">1. WLAN</button>
+                <button id="qr-share-app" type="button">2. APP</button>
+              </div>
+              <button id="qr-share-back" class="qr-share-back" type="button">Back</button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

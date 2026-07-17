@@ -140,10 +140,17 @@ h2 + p {
 }
 
 .screen--calibration[data-phase="center"] {
-  --cross-color: #ffd76a;
+  --cross-color: #fff;
   background:
-    radial-gradient(circle at 50% 42%, rgba(255, 215, 106, 0.18), transparent 36%),
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.14), transparent 36%),
     linear-gradient(180deg, #141922 0%, #090b10 100%);
+}
+
+.screen--calibration {
+  --calibration-cross-size: min(50vw, 50vh);
+  --calibration-side-area: calc((100dvh - var(--calibration-cross-size)) / 2);
+  --calibration-safe-bottom: max(5vw, env(safe-area-inset-bottom));
+  --calibration-action-size: min(42.5vw, calc(var(--calibration-side-area) - var(--calibration-safe-bottom)));
 }
 
 .screen__frame {
@@ -176,6 +183,7 @@ h2 + p {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center center;
   opacity: 0.82;
 }
 
@@ -190,18 +198,16 @@ h2 + p {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  display: grid;
-  place-items: center;
 }
 
 .calibration-card {
   position: absolute;
-  top: 5vw;
+  top: calc(var(--calibration-side-area) / 2);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   width: min(90vw, 30rem);
-  height: 42.5vw;
-  padding: 0.9rem 1rem;
+  max-height: calc(var(--calibration-side-area) - clamp(1.5rem, 6vw, 3rem));
+  padding: clamp(0.65rem, 2vw, 1rem);
   border: 0.28rem solid var(--cross-color);
   border-radius: 1rem;
   background: rgba(8, 11, 16, 0.62);
@@ -211,20 +217,15 @@ h2 + p {
   box-shadow: 0 0 22px color-mix(in srgb, var(--cross-color) 18%, transparent);
   display: grid;
   align-content: center;
+  justify-items: center;
 }
 
 .screen--calibration[data-phase="center"] .calibration-card {
-  top: 50%;
-  height: auto;
-  min-height: 42.5vw;
+  top: calc(var(--calibration-side-area) / 2);
   transform: translate(-50%, -50%);
 }
 
-.screen--calibration[data-phase="center"] .calibration-preview__cross {
-  display: none;
-}
-
-.screen--calibration[data-phase="center"] .calibration-copy {
+.screen--calibration[data-phase="center"] .calibration-cross-box {
   display: none;
 }
 
@@ -246,9 +247,21 @@ h2 + p {
   color: rgba(247, 245, 239, 0.82);
 }
 
+.calibration-cross-box {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--calibration-cross-size);
+  height: var(--calibration-cross-size);
+  padding: 5%;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+}
+
 .calibration-preview__cross {
-  width: min(70vw, 58vh);
-  height: min(70vw, 58vh);
+  width: 100%;
+  height: 100%;
   overflow: visible;
   fill: var(--cross-color);
   opacity: 0.9;
@@ -275,16 +288,20 @@ h2 + p {
   position: absolute;
   left: 5vw;
   right: 5vw;
-  bottom: max(5vw, env(safe-area-inset-bottom));
+  bottom: 0;
+  height: var(--calibration-side-area);
+  padding-bottom: var(--calibration-safe-bottom);
   display: grid;
-  grid-template-columns: 42.5vw 42.5vw;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  justify-items: center;
   gap: 5vw;
   pointer-events: auto;
 }
 
 .screen__actions button {
-  width: 42.5vw;
-  height: 42.5vw;
+  width: var(--calibration-action-size);
+  height: var(--calibration-action-size);
   min-height: 0;
   padding: 0;
   background: rgba(8, 11, 16, 0.68);
@@ -336,8 +353,7 @@ h2 + p {
 }
 
 .control-shell__header,
-.joystick-panel,
-.button-panel {
+.joystick-panel {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 1.5rem;
@@ -345,9 +361,15 @@ h2 + p {
   backdrop-filter: blur(14px);
 }
 
-.recalibrate-button {
-  justify-self: stretch;
+.control-share-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.75rem;
   width: 100%;
+}
+
+.control-share-actions__button {
+  flex: 1 1 0;
   padding: 0.75rem 0.9rem;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -356,11 +378,146 @@ h2 + p {
   backdrop-filter: blur(14px);
 }
 
+.control-share-actions__button--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  line-height: 1.1;
+}
+
+.control-share-actions__button--stacked span:first-child {
+  font-size: 1em;
+  opacity: 1;
+}
+
+.control-share-actions__button--stacked span:last-child {
+  font-size: 0.82em;
+  opacity: 0.78;
+}
+
+.screen--qr-share {
+  --qr-bg: #fff;
+  --qr-fg: #000;
+  --qr-action-size: min(42.5vw, 18dvh);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.14), transparent 30%),
+    #090b10;
+}
+
+.screen--qr-share .screen__frame {
+  overflow: hidden;
+}
+
+.qr-share-layout {
+  height: 100%;
+  padding: max(1.25rem, 6dvh, env(safe-area-inset-top)) 5vw max(5vw, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.qr-share-stage {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  align-content: start;
+  gap: clamp(0.35rem, 1.5dvh, 0.8rem);
+  text-align: center;
+}
+
+.qr-share-stage h1 {
+  font-size: clamp(1.35rem, 5.8vw, 2.6rem);
+  line-height: 1;
+}
+
+.qr-share-code {
+  width: min(78vw, 39dvh);
+  aspect-ratio: 1;
+  padding: 4%;
+  background: var(--qr-bg);
+  color: var(--qr-fg);
+  border-radius: 1rem;
+  box-shadow: 0 0 34px rgba(255, 255, 255, 0.12);
+}
+
+.qr-share-code svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.qr-share-copy {
+  max-width: min(78vw, 32rem);
+  color: rgba(247, 245, 239, 0.86);
+  font-size: clamp(0.75rem, 2.8vw, 1rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.qr-share-controls {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(0.5rem, 1.5dvh, 1rem);
+  padding-top: clamp(0.5rem, 1.8dvh, 1rem);
+  pointer-events: auto;
+}
+
+.qr-share-actions {
+  display: grid;
+  grid-template-columns: var(--qr-action-size) var(--qr-action-size);
+  justify-content: center;
+  gap: 5vw;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.qr-share-actions button,
+.qr-share-back {
+  min-height: 0;
+  padding: 0;
+  background: var(--qr-bg);
+  color: var(--qr-fg);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  opacity: 0.76;
+  backdrop-filter: blur(14px);
+}
+
+.qr-share-actions button {
+  width: var(--qr-action-size);
+  height: var(--qr-action-size);
+}
+
+.qr-share-actions button.is-active {
+  opacity: 1;
+  box-shadow: 0 0 0 0.3rem rgba(255, 255, 255, 0.18) inset;
+}
+
+.qr-share-back {
+  width: 100%;
+  height: clamp(3rem, 8dvh, 4rem);
+  border-radius: 0.85rem;
+}
+
 .joystick-panel,
 .button-panel {
   display: grid;
-  gap: 1rem;
   align-self: end;
+}
+
+.joystick-panel {
+  gap: 1rem;
+}
+
+.button-panel {
+  padding: 1rem;
+  align-self: end;
+  place-items: center;
 }
 
 .screen--control[data-mode="laptop"] .control-shell {
@@ -430,12 +587,13 @@ h2 + p {
 
 .button-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.8rem;
+  width: 100%;
+  place-items: center;
 }
 
 .button-grid button {
   width: 100%;
+  max-width: 100%;
   aspect-ratio: 1;
   min-height: 0;
   background: rgba(255, 255, 255, 0.08);
