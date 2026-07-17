@@ -102,8 +102,11 @@ const peerPort = forcedPeerPort ? Number(forcedPeerPort) : (peerSecure ? Number(
 const peerPath = '/peerjs'
 // WebSocket relay endpoint (player input transport). Fixed IP is the user's
 // config; we derive the host from where the page is served unless overridden.
+const isProxied = window.location.port === '' || window.location.port === '80' || window.location.port === '443'
 const relayPort = Number(query.get('relay-port') ?? 8083)
-const relayUrl = query.get('relay') || (peerSecure ? `wss://${window.location.host}/ws-relay` : `ws://${peerHost}:${relayPort}`)
+const relayUrl = query.get('relay') || (isProxied
+  ? `${peerSecure ? 'wss' : 'ws'}://${window.location.host}/ws-relay`
+  : `${peerSecure ? 'wss' : 'ws'}://${peerHost}:${relayPort}`)
 const controllerColor = query.get('color') || '#8bd3ff'
 const wsTransport = useWebsocket ? new WebSocketClientTransport(relayUrl, sessionId) : null
 

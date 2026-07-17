@@ -268,7 +268,7 @@ h2 + p {
 }
 
 .screen--calibration[data-phase="back"] {
-  --cross-color: #75ff7d;
+  --cross-color: #ff0;
 }
 
 .screen__actions {
